@@ -73,7 +73,7 @@
 | `maintainer` / `maintainer_url` | `VirKing` + 仓库地址 | 开发者信息 |
 | `distributor` / `distributor_url` | `VirKing` + 仓库地址 | 发布者信息 |
 | `helpurl` | 仓库地址 | 帮助与反馈地址 |
-| `service_port` | `19988` | 服务端口 |
+| `service_port` | `19099` | 服务端口（管理页默认端口） |
 | `ctl_stop` | `true` | 允许在应用中心启动/停止 |
 | `desktop_uidir` | `ui` | 桌面入口目录 |
 | `desktop_applaunchname` | `vnt-nas.main` | 应用卡片打开的入口 |

@@ -194,6 +194,58 @@ def test_desktop_entries():
     check("卡片入口为管理页",
           "desktop_applaunchname = vnt-nas.main" in mf)
 
+    # service_port 必须与实际默认端口一致。
+    # 曾出现 manifest 仍写旧值 19988、而应用默认已改为 19099 的不一致：
+    # 飞牛会按 manifest 声明的端口探测应用状态，端口错会让应用在
+    # 应用中心显示异常（如「已安装」页状态/图标渲染不出来）。
+    m = re.search(r"service_port\s*=\s*(\d+)", mf)
+    check("manifest 声明了 service_port", bool(m))
+    if m:
+        check("service_port 与默认管理页端口一致（%d）"
+              % S.PANEL_PORT_DEFAULT,
+              int(m.group(1)) == S.PANEL_PORT_DEFAULT,
+              "manifest=%s 默认=%d" % (m.group(1), S.PANEL_PORT_DEFAULT))
+
+    # 图标文件必须齐备且尺寸正确。
+    # ui/config 的 icon 用 "images/icon_{0}.png"，{0} 会被飞牛替换为
+    # 64 与 256，因此这两个文件缺一不可；尺寸也须与文件名对应
+    # （曾见「已安装」页图标空白的反馈，故纳入回归）。
+    def png_size(path):
+        try:
+            d = open(path, "rb").read()
+        except OSError:
+            return None
+        if d[:8] != b"\x89PNG\r\n\x1a\n":
+            return "not-png"
+        import struct
+        return struct.unpack(">II", d[16:24])
+
+    icon_spec = {
+        "images/icon_64.png": (64, 64),
+        "images/icon_256.png": (256, 256),
+    }
+    check("图标路径使用 {0} 占位符",
+          main.get("icon") == "images/icon_{0}.png", main.get("icon"))
+    for rel, want in icon_spec.items():
+        p = os.path.join(ROOT, "app", "ui", rel)
+        got = png_size(p)
+        check("app/ui/%s 存在且为 PNG" % rel, got not in (None, "not-png"),
+              got)
+        check("app/ui/%s 尺寸为 %dx%d" % (rel, want[0], want[1]),
+              got == want, got)
+
+    # 只声明了 {0} 两个尺寸，目录里不应有多余尺寸（避免误以为需 128）
+    img_dir = os.path.join(ROOT, "app", "ui", "images")
+    pngs = sorted(n for n in os.listdir(img_dir) if n.endswith(".png"))
+    check("images 目录只含 64/256 两个图标",
+          pngs == ["icon_256.png", "icon_64.png"], pngs)
+
+    # 根目录图标（应用中心列表用）也必须齐备且尺寸正确
+    for fn, want in (("ICON.PNG", (64, 64)), ("ICON_256.PNG", (256, 256))):
+        got = png_size(os.path.join(ROOT, fn))
+        check("根目录 %s 尺寸为 %dx%d" % (fn, want[0], want[1]),
+              got == want, got)
+
 
 def test_panel_url():
     print("6) 面板地址推导与令牌自动注入")
