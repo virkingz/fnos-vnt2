@@ -132,6 +132,10 @@ def main():
     txt = body.decode("utf-8", "replace")
     check("首页 200", code == 200, code)
     check("含面板内容", "VNT PANEL" in txt, txt[:80])
+    check("已注入桌面宿主标志", "__VNT_DESKTOP__" in txt, txt[:150])
+    check("标志早于应用脚本",
+          txt.find("__VNT_DESKTOP__") < txt.find("assets/index-abc.js"))
+    check("已注入令牌兜底", "vnt-web-access-token" in txt, txt[:200])
     check("资源已改写为 /core/assets/",
           'src="/core/assets/index-abc.js"' in txt, txt[:400])
     check("CSS 已改写",

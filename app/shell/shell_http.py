@@ -194,6 +194,55 @@ def rewrite_paths(text, prefix=PROXY_PREFIX):
     return _ABS_PATH_RE.sub(repl, text)
 
 
+def _inject_desktop_flag(html, token):
+    """向 vnt2_web 的 HTML 注入「桌面宿主」标志与令牌。
+
+    为什么需要
+    ----------
+    vnt2_web 的登录态存在 **localStorage**，而 localStorage 按「源」隔离：
+    直连它自己的端口时令牌存在那个源；经本应用 /core/ 内嵌后是另一个源，
+    读不到令牌，前端就渲染 AccessGate 登录页（表现为内嵌区域只显示登录框）。
+
+    二进制中的真实逻辑：
+        const At = !!globalThis.__VNT_DESKTOP__;   // 桌面宿主标志
+        const io = Y(At ? "" : wr || localStorage.getItem(lo) || "");
+        const Qr = Y(At || !!io.value);            // 有标志即视为已登录
+
+    即 vnt2_web 原生支持「桌面宿主」模式：只要 __VNT_DESKTOP__ 为真，
+    就跳过令牌校验。这里正是扮演桌面宿主，因此在 `<head>` 最前面注入该标志。
+
+    同时把令牌写入 localStorage 作为兜底：万一某版本不看该标志，
+    令牌已在，仍能自动放行。
+    """
+    import json as _json
+    if "__VNT_DESKTOP__" in html:
+        return html
+
+    tok = token or ""
+    script = (
+        "<script>(function(){try{"
+        "globalThis.__VNT_DESKTOP__=true;"
+        + ("localStorage.setItem('vnt-web-access-token',"
+           + _json.dumps(tok) + ");" if tok else "")
+        + "}catch(e){}})();</script>"
+    )
+
+    # 尽量插在 <head> 之后，确保早于应用脚本执行
+    lower = html.lower()
+    idx = lower.find("<head")
+    if idx != -1:
+        end = html.find(">", idx)
+        if end != -1:
+            return html[:end + 1] + script + html[end + 1:]
+    # 没有 head：插在 <html> 后或最前面
+    idx = lower.find("<html")
+    if idx != -1:
+        end = html.find(">", idx)
+        if end != -1:
+            return html[:end + 1] + script + html[end + 1:]
+    return script + html
+
+
 def jdump(obj):
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
@@ -604,7 +653,10 @@ class Handler(BaseHTTPRequestHandler):
         if data and ("text/html" in ctype or "javascript" in ctype
                      or "text/css" in ctype or "application/json" in ctype):
             try:
-                data = rewrite_paths(data.decode("utf-8"), prefix).encode("utf-8")
+                text = rewrite_paths(data.decode("utf-8"), prefix)
+                if "text/html" in ctype:
+                    text = _inject_desktop_flag(text, S.get_token())
+                data = text.encode("utf-8")
             except UnicodeDecodeError:
                 pass
 
@@ -727,6 +779,32 @@ class Handler(BaseHTTPRequestHandler):
         else:
             panel_detail = "核心未运行或缺少令牌，跳过"
         add("组网面板可访问", panel_ok, panel_detail)
+
+        # 关键：内嵌用的是 /core/ 代理路径，必须单独验证这条链路。
+        # 上面那项测的是「直连核心」，与内嵌无关——曾因此误判「全绿却空白」。
+        mount = self._mount(raw_path)
+        proxy_url = "http://127.0.0.1:%d%s%s/" % (
+            S.PORTS["PANEL_PORT"], mount or "", PROXY_PREFIX)
+        proxy_ok, proxy_detail = False, ""
+        try:
+            code, body = S.http_get(proxy_url, timeout=8)
+            txt = body.decode("utf-8", "replace")
+            if code != 200:
+                proxy_detail = "代理返回 HTTP %s（内嵌会失败）" % code
+            elif "<div" not in txt and "<html" not in txt.lower():
+                proxy_detail = ("代理返回的不是页面（%d 字节）：%s"
+                                % (len(body), txt[:120]))
+            else:
+                want = (mount or "") + PROXY_PREFIX + "/assets/"
+                proxy_ok = True
+                proxy_detail = ("代理页面可访问（%d 字节）" % len(body)
+                                + ("，资源路径已改写"
+                                   if want in txt
+                                   else "，但未发现已改写的资源路径"))
+            add("内嵌代理链路（/core/）", proxy_ok, proxy_detail)
+        except Exception as e:  # noqa: BLE001
+            add("内嵌代理链路（/core/）", False,
+                "代理请求失败：%s —— 这就是内嵌空白的原因" % e)
 
         # 网关挂载前缀是否正确识别
         add("挂载前缀识别", True,
