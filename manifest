@@ -4,6 +4,7 @@ display_name = VNT 组网
 desc = 基于 VNT (vnt2_web) 的异地组网与内网穿透应用。本插件为管理壳：负责设置访问令牌、托管 vnt2_web 核心进程，并支持从 GitHub Releases 在线更新核心二进制。组网的添加、启动与查看由 vnt2_web 自带网页完成。
 platform = all
 source = thirdparty
+os_min_version = 1.1.0
 maintainer = VirKing
 maintainer_url = https://github.com/virkingz/fnos-vnt2
 distributor = VirKing
