@@ -592,13 +592,6 @@ class Handler(BaseHTTPRequestHandler):
                                         "bind": S.read_bind(),
                                     }})
 
-        if path == "/api/panel_direct":
-            # 直连兜底：用核心自己的端口 + 令牌直接打开，绕过 /core/ 反代。
-            # 当反代链路在网关下异常时，这条路径仍可用（浏览器直连 IP:端口）。
-            # 需要核心监听全部网卡，否则局域网浏览器连不上。
-            return self._json(200, {"code": 0, "msg": "success",
-                                    "data": self._panel_direct()})
-
         if path == "/api/probe_proxy":
             # 对照诊断：把「直连核心」与「经本应用 /core/ 代理」的响应
             # 放在一起比对，找出差异。这是定位白屏的最直接手段。
@@ -785,23 +778,6 @@ class Handler(BaseHTTPRequestHandler):
         if not req_host or req_host in ("localhost", "127.0.0.1", "::1"):
             req_host = self._lan_ip() or "127.0.0.1"
         return "http://%s:%d/" % (req_host, S.PORTS["VNT_WEB_PORT"])
-
-    def _panel_direct(self):
-        """直连面板的数据：地址（含令牌）+ 可用性说明。"""
-        bind = S.read_bind()
-        base = self._panel_direct_url(bind)
-        if not base:
-            return {"url": "", "display_url": "",
-                    "bind": bind, "can_open": False,
-                    "why": "核心仅监听本机（127.0.0.1），其它设备连不上。"
-                           "请在「组网面板监听范围」改为「全部网卡」。"}
-        if not S.core_running():
-            return {"url": "", "display_url": "", "bind": bind,
-                    "can_open": False, "why": "核心未运行，请先启动核心。"}
-        tok = S.get_token()
-        url = base + ("?token=" + quote(tok, safe="") if tok else "")
-        return {"url": url, "display_url": base, "bind": bind,
-                "can_open": True, "why": ""}
 
     def _probe_proxy(self, raw_path=""):
         """比对「直连核心」与「经本应用代理」的响应差异。

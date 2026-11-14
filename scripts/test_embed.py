@@ -165,30 +165,23 @@ def test_embed_restored():
 
 
 def test_desktop_entries():
-    print("5) 桌面两个图标：管理页 + 面板入口")
+    print("5) 桌面只有一个图标（管理页）")
     import json
     cfg = json.load(open(os.path.join(ROOT, "app", "ui", "config"),
                          encoding="utf-8"))
     urls = cfg[".url"]
-    check("存在两个入口", len(urls) == 2, list(urls))
+    check("只有一个入口", len(urls) == 1, list(urls))
 
     main = urls.get("vnt-nas.main", {})
-    panel = urls.get("vnt-nas.panel", {})
-
-    check("管理页入口为 iframe", main.get("type") == "iframe",
-          main.get("type"))
-    check("管理页走统一网关", main.get("gatewayPrefix") == "/app/vnt-nas",
+    check("入口为 iframe", main.get("type") == "iframe", main.get("type"))
+    check("走统一网关", main.get("gatewayPrefix") == "/app/vnt-nas",
           main.get("gatewayPrefix"))
+    check("指向管理页", main.get("url") == "/app/vnt-nas", main.get("url"))
+    check("已移除面板图标", "vnt-nas.panel" not in urls)
 
-    # 面板图标：type=url（浏览器新窗口），端口用向导占位符
-    # 真实仓库佐证：fn-rtl8125 / FN_WOL / Fndesk 均用 ${自定义字段名}
-    check("面板入口为 url", panel.get("type") == "url",
-          panel.get("type"))
-    check("面板入口端口引用向导字段",
-          panel.get("port") == "${wizard_panel_port}", panel.get("port"))
-    check("两入口标题不同", main.get("title") != panel.get("title"))
+    # 组网面板现在经 /core/ 内嵌，不再需要独立的直连图标
 
-    # 向导必须提供该字段，否则占位符解析不出来
+    # 向导仍需提供两个端口字段（管理页端口 + 面板端口，后者避免冲突）
     for wf in ("install", "config"):
         w = open(os.path.join(ROOT, "wizard", wf), encoding="utf-8").read()
         check("wizard/%s 含 wizard_panel_port 字段" % wf,
@@ -260,7 +253,7 @@ def test_architecture():
              encoding="utf-8").read()
     check("PROXY_PREFIX 指向 /core", 'PROXY_PREFIX = "/core"' in h)
     check("实现 _proxy_panel", "def _proxy_panel" in h)
-    check("提供直连兜底接口", "/api/panel_direct" in h)
+    check("提供代理对照诊断", "/api/probe_proxy" in h)
 
     main = open(os.path.join(ROOT, "app", "shell", "shell_main.py"),
                 encoding="utf-8").read()

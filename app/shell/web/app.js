@@ -484,20 +484,6 @@
     }).catch(function (e) { toast(e.message, true); });
   }
 
-  // 直连兜底：用核心自己的端口 + 令牌直接打开（绕过反代）
-  function openPanelDirect() {
-    req('/api/panel_direct').then(function (r) {
-      if (r.code !== 0) throw new Error(r.msg);
-      var d = r.data || {};
-      if (!d.url) {
-        toast('核心未运行或监听范围为仅本机，无法直连', true);
-        return;
-      }
-      window.open(d.url, '_blank');
-      toast('已用直连地址打开（绕过代理）');
-    }).catch(function (e) { toast(e.message, true); });
-  }
-
   function reloadFrame() {
     var f = $('coreFrame');
     if (f) {
@@ -706,7 +692,6 @@
     $('btnSaveBind').addEventListener('click', saveBind);
     $('btnDiag').addEventListener('click', runDiag);
     $('btnCopyPanel').addEventListener('click', copyPanelUrl);
-    $('btnOpenDirect').addEventListener('click', openPanelDirect);
     $('btnReloadFrame').addEventListener('click', reloadFrame);
   }
 
