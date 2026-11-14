@@ -574,7 +574,26 @@
       // 「路径不可达」与「iframe 被限制」两种失败。
       return browserProbe(d.panel_url).then(function (probeLines) {
         lines = lines.concat(probeLines, ['']);
-        return { d: d, lines: lines };
+        // 再取一次「直连 vs 代理」的对照，定位内容层面的差异
+        return req('/api/probe_proxy').then(function (pr) {
+          var pd = pr.data || {};
+          lines.push('— 直连 vs 代理 对照 —');
+          var dir = pd.direct || {};
+          var px = pd.proxy || {};
+          lines.push('直连核心：' + (dir.error ? ('失败 ' + dir.error)
+                     : ('HTTP ' + dir.status + '，' + dir.len + ' 字节')));
+          lines.push('经代理：' + (px.error ? ('失败 ' + px.error)
+                     : ('HTTP ' + px.status + '，' + px.len + ' 字节')));
+          if (px.refs && px.refs.length) {
+            lines.push('代理版资源引用：');
+            px.refs.forEach(function (r) { lines.push('  ' + r); });
+          }
+          (pd.diff || []).forEach(function (x) { lines.push('差异：' + x); });
+          lines.push('');
+          return { d: d, lines: lines };
+        }).catch(function () {
+          return { d: d, lines: lines };
+        });
       });
     }).then(function (res) {
       var d = res.d;

@@ -194,88 +194,81 @@ def rewrite_paths(text, prefix=PROXY_PREFIX):
     return _ABS_PATH_RE.sub(repl, text)
 
 
-def inject_token(html, token):
-    """向 vnt2_web 的 HTML 注入访问令牌（使其在新源下也能自动登录）。
+def inject_token(html, token, mount=""):
+    """向 vnt2_web 的 HTML 注入 <base>、访问令牌与 API 接管钩子。
 
-    为什么需要
-    ----------
-    vnt2_web 的登录态存在 **localStorage**，而 localStorage 按「源」隔离：
-    直连它自己的端口时令牌存在那个源；经本应用 /core/ 内嵌后是另一个源，
-    读不到令牌，前端便渲染 AccessGate 登录页（表现为空白）。
+    这三件事共同解决「子路径托管 SPA」的问题：
 
-    二进制中的真实逻辑：
-        const wr = url.searchParams.get("token") || "";
-        wr && localStorage.setItem("vnt-web-access-token", wr);
-        const io = Y(At ? "" : wr || localStorage.getItem(lo) || "");
+    1) **`<base>` —— 关键**
+       Vue Router 的 createWebHistory() 未显式传 base 时会读 `<base href>`：
+           function normalizeBase(base){
+             if(!base){ const el=document.querySelector('base')
+                        base=(el&&el.getAttribute('href'))||'/' }
+             ...
+           }
+       不注入时 base 取 `/`，而实际路径是 `/app/vnt-nas/core/`，
+       路由表里没有这一条 → 渲染空白；直连路径恰为 `/` 所以正常。
+       注入后 base 正确，路由即可匹配。
 
-    ⚠ 关键：**不能设置 globalThis.__VNT_DESKTOP__**。
-    该标志为真时令牌会被置空（`At ? "" : ...`），且它只是为「由宿主代发
-    请求」的桌面端准备的——那种场景下宿主通过 __VNT_API_REQUEST__ 钩子
-    接管全部 API，前端自己不再附加 Authorization。
-    我们并未接管 API，若设了该标志，所有请求都会因缺少令牌而 401，
-    前端随即登出，界面就是空白（曾据此误判为「免登录开关」）。
+    2) **令牌**
+       vnt2_web 的登录态存在 localStorage，且按「源」隔离。
+       直连时令牌存在那个源；经本应用内嵌是另一个源，读不到便显示登录页。
+       ⚠ 绝不能设 globalThis.__VNT_DESKTOP__：该标志为真时前端会把令牌
+       置空（`At ? "" : ...`），而我们没接管 API，会导致全部请求 401。
 
-    因此这里只把令牌写入 localStorage，等价于 URL 带 ?token=xxx 的效果。
+    3) **`__VNT_API_REQUEST__` —— 官方 API 接管口**
+       前端所有请求都经 De() 发出，而 De() 开头即：
+           if(globalThis.__VNT_API_REQUEST__){
+             const l = await globalThis.__VNT_API_REQUEST__({method,path,body})
+             if(l.code!==0) throw ...; return l.data }
+       定义该钩子后，前端不再自己 fetch，全部交给宿主。
+       于是我们可自行拼出正确的代理地址并附带令牌——
+       **无需改写 JS**，从根本上避免改坏压缩代码。
     """
     import json as _json
     if "vnt-web-access-token" in html:
         return html
-    if not token:
-        return html
 
-    # 注入诊断脚本：① 写入令牌 ② 捕获报错 ③ 探测 API 是否可用。
-    # 面板白屏时，这三项能直接区分「资源没加载 / JS 执行出错 / 接口不通」，
-    # 无需再靠猜测。
-    script = (
-        "<script>(function(){"
-        "var L=[];"
-        "function show(){try{"
-        "var d=document.getElementById('__vnt_dbg');"
-        "if(!d){d=document.createElement('div');d.id='__vnt_dbg';"
-        "d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:2147483647;"
-        "background:#501313;color:#fff;font:12px/1.55 monospace;padding:8px 10px;"
-        "max-height:45vh;overflow:auto;white-space:pre-wrap';"
-        "(document.body||document.documentElement).appendChild(d);}"
-        "d.textContent='[vnt-nas 面板诊断]\\n'+L.slice(-10).join('\\n');"
-        "}catch(e){}}"
-        "window.addEventListener('error',function(e){"
-        "L.push('JS 错误: '+(e.message||'')+' @ '+(e.filename||'').split('/').pop());show();"
-        "},true);"
-        "window.addEventListener('unhandledrejection',function(e){"
-        "var r=e.reason;L.push('Promise 拒绝: '+((r&&(r.message||r))||''));show();});"
-        "try{localStorage.setItem('vnt-web-access-token',"
-        + _json.dumps(token) + ");"
-        "L.push('已写入令牌, 长度='+" + str(len(token)) + ");}"
-        "catch(e){L.push('写令牌失败: '+e.message);}"
-        "setTimeout(function(){"
-        "var base=location.pathname.replace(/\\/core\\/.*$/,'/core/');"
-        "fetch(base+'api/version',{cache:'no-store'})"
-        ".then(function(r){L.push('API /api/version → HTTP '+r.status);show();"
+    base_href = (mount or "") + PROXY_PREFIX + "/"
+    api_prefix = (mount or "") + PROXY_PREFIX
+
+    js = (
+        "try{"
+        "localStorage.setItem('vnt-web-access-token'," + _json.dumps(token) + ");"
+        "}catch(e){}"
+        # 接管全部 API：拼上代理前缀并附带令牌
+        "globalThis.__VNT_API_REQUEST__=function(o){"
+        "o=o||{};"
+        "var u=" + _json.dumps(api_prefix) + "+(o.path||'');"
+        "var h={'Content-Type':'application/json',"
+        "'Authorization':'Bearer '+" + _json.dumps(token) + "};"
+        "var init={method:o.method||'GET',headers:h,cache:'no-store'};"
+        "if(o.body!=null&&o.method&&o.method!=='GET')"
+        "init.body=typeof o.body==='string'?o.body:JSON.stringify(o.body);"
+        "return fetch(u,init).then(function(r){"
         "return r.text().then(function(t){"
-        "L.push('  响应: '+t.slice(0,120));show();});})"
-        ".catch(function(e){L.push('API 请求失败: '+e.message);show();});"
-        "},700);"
-        "setTimeout(function(){"
-        "var n=document.getElementById('__vnt_dbg');"
-        "if(n&&!n.textContent)return;"
-        "if(!n){L.push('无报错，但界面仍空白 → 前端渲染未产出节点');show();}"
-        "},2600);"
-        "})();</script>"
+        "try{return JSON.parse(t)}catch(e){"
+        "return {code:-1,msg:'非 JSON 响应('+r.status+')',data:null}};});"
+        "});};"
     )
+    script = "<script>%s</script>" % js
+    # base 必须最先出现，且要早于任何相对 URL
+    base_tag = '<base href="%s">' % base_href
 
-    # 插在 <head> 之后，确保早于应用脚本执行
+    # 插在 <head> 之后：base 在最前，其次是脚本，确保都早于应用脚本执行
+    inject = base_tag + script
     lower = html.lower()
     idx = lower.find("<head")
     if idx != -1:
         end = html.find(">", idx)
         if end != -1:
-            return html[:end + 1] + script + html[end + 1:]
+            return html[:end + 1] + inject + html[end + 1:]
     idx = lower.find("<html")
     if idx != -1:
         end = html.find(">", idx)
         if end != -1:
-            return html[:end + 1] + script + html[end + 1:]
-    return script + html
+            return html[:end + 1] + inject + html[end + 1:]
+    return inject + html
 
 
 def jdump(obj):
@@ -606,6 +599,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"code": 0, "msg": "success",
                                     "data": self._panel_direct()})
 
+        if path == "/api/probe_proxy":
+            # 对照诊断：把「直连核心」与「经本应用 /core/ 代理」的响应
+            # 放在一起比对，找出差异。这是定位白屏的最直接手段。
+            return self._json(200, {"code": 0, "msg": "success",
+                                    "data": self._probe_proxy(raw_path)})
+
         if path == "/api/mirror" and method == "POST":
             body = self._body()
             m = str(body.get("mirror") or "").strip().rstrip("/")
@@ -691,13 +690,14 @@ class Handler(BaseHTTPRequestHandler):
                 ctype = v
                 break
 
-        # 只改写文本类内容；图片等二进制原样透传
-        if data and ("text/html" in ctype or "javascript" in ctype
-                     or "text/css" in ctype or "application/json" in ctype):
+        # 只改写 HTML：其中的 /assets/... 是绝对路径，浏览器会从站点根取。
+        # **不改写 JS**：API 已由注入的 __VNT_API_REQUEST__ 钩子接管，
+        # 且 minify 后的 JS 做字符串替换风险高（曾疑似改坏导致白屏）。
+        # 图片等二进制一律原样透传。
+        if data and "text/html" in ctype:
             try:
                 text = rewrite_paths(data.decode("utf-8"), prefix)
-                if "text/html" in ctype:
-                    text = inject_token(text, S.get_token())
+                text = inject_token(text, S.get_token(), mount)
                 data = text.encode("utf-8")
             except UnicodeDecodeError:
                 pass
@@ -802,6 +802,67 @@ class Handler(BaseHTTPRequestHandler):
         url = base + ("?token=" + quote(tok, safe="") if tok else "")
         return {"url": url, "display_url": base, "bind": bind,
                 "can_open": True, "why": ""}
+
+    def _probe_proxy(self, raw_path=""):
+        """比对「直连核心」与「经本应用代理」的响应差异。
+
+        白屏排查时，光看「能不能取到」不够，还要看两者内容是否一致。
+        这里把两边的状态码、长度、指纹、以及页面引用的资源列表并列，
+        差异一眼可见。
+        """
+        cop = "http://127.0.0.1:%d/" % S.PORTS["VNT_WEB_PORT"]
+        tok = S.get_token()
+        auth = {"Authorization": "Bearer %s" % tok} if tok else {}
+        out = {"direct": {}, "proxy": {}, "diff": []}
+
+        # ① 直连核心
+        try:
+            code, body = S.http_get(cop, timeout=8, headers=auth)
+            out["direct"] = {"status": code, "len": len(body),
+                             "head": body[:160].decode("utf-8", "replace")}
+        except Exception as e:  # noqa: BLE001
+            out["direct"] = {"error": str(e)}
+
+        # ② 经本应用 /core/
+        mount = self._mount(raw_path)
+        purl = "http://127.0.0.1:%d%s%s/" % (S.PORTS["PANEL_PORT"],
+                                            mount or "", PROXY_PREFIX)
+        try:
+            code, body = S.http_get(purl, timeout=8)
+            txt = body.decode("utf-8", "replace")
+            refs = re.findall(r'(?:src|href)="([^"]+)"', txt)
+            out["proxy"] = {
+                "url": purl, "status": code, "len": len(body),
+                "head": txt[:160],
+                "has_token_script": "vnt-web-access-token" in txt,
+                "refs": refs[:8],
+                "refs_count": len(refs),
+            }
+        except Exception as e:  # noqa: BLE001
+            out["proxy"] = {"url": purl, "error": str(e)}
+
+        # ③ 差异
+        d = out.get("direct", {})
+        p = out.get("proxy", {})
+        if d.get("error"):
+            out["diff"].append("直连核心失败：%s" % d["error"])
+        if p.get("error"):
+            out["diff"].append("经代理失败：%s" % p["error"])
+        if not out["diff"]:
+            if abs(d.get("len", 0) - p.get("len", 0)) > 400:
+                out["diff"].append(
+                    "两边长度差异较大（直连 %s / 代理 %s），"
+                    "代理版多了注入脚本属正常，但需确认注入内容正确"
+                    % (d.get("len"), p.get("len")))
+            if not p.get("has_token_script"):
+                out["diff"].append("代理版**没有**注入令牌脚本 → 会停在登录页")
+            for r in p.get("refs", []):
+                if r.startswith("/assets/"):
+                    out["diff"].append(
+                        "资源引用**未改写**：%s → 浏览器会 404，必然白屏" % r)
+            if not out["diff"]:
+                out["diff"].append("两边均正常，未见明显差异")
+        return out
 
     # --- 自检 -----------------------------------------------------------
     def _diag(self, raw_path):

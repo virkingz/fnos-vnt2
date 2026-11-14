@@ -133,8 +133,10 @@ def main():
     check("首页 200", code == 200, code)
     check("含面板内容", "VNT PANEL" in txt, txt[:80])
     check("已注入访问令牌", "vnt-web-access-token" in txt, txt[:200])
-    check("令牌脚本早于应用脚本",
-          txt.find("vnt-web-access-token") < txt.find("assets/index-abc.js"))
+    check("已注入 <base>", "<base href=" in txt, txt[:200])
+    check("base 早于应用脚本",
+          txt.find("<base") < txt.find("assets/index-abc.js"))
+    check("已注入 API 接管钩子", "__VNT_API_REQUEST__" in txt, txt[:250])
     # 绝不能设 __VNT_DESKTOP__：该标志会让前端把令牌置空，
     # 而我们并未接管 API，会导致所有请求 401 后登出（白屏根因）
     check("未设 __VNT_DESKTOP__（会清空令牌）",
@@ -153,10 +155,9 @@ def main():
     code, body, hdrs = get("/core/assets/index-abc.js")
     js = body.decode("utf-8", "replace")
     check("JS 200", code == 200, code)
-    check("fetch 路径已改写", 'fetch("/core/api/instances")' in js, js[:200])
-    check("常量路径已改写", '"/core/api/version"' in js, js[:200])
-    check("嵌套路径已改写", '"/core/api/start/status"' in js, js[:200])
-    check("无残留裸 /api/", '"/api/' not in js, js[:200])
+    # 现在不再改写 JS：API 由注入的 __VNT_API_REQUEST__ 钩子接管，
+    # minify 后的 JS 做字符串替换风险高（曾疑似改坏导致白屏）。
+    check("JS 保持原样（不改写）", '"/api/instances"' in js, js[:200])
 
     # 3. 代理转发时已剥掉 /core 前缀
     print("3) 代理转发路径正确性")
