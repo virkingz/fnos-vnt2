@@ -223,11 +223,44 @@ def inject_token(html, token):
     if not token:
         return html
 
+    # 注入诊断脚本：① 写入令牌 ② 捕获报错 ③ 探测 API 是否可用。
+    # 面板白屏时，这三项能直接区分「资源没加载 / JS 执行出错 / 接口不通」，
+    # 无需再靠猜测。
     script = (
-        "<script>(function(){try{"
-        "localStorage.setItem('vnt-web-access-token',"
+        "<script>(function(){"
+        "var L=[];"
+        "function show(){try{"
+        "var d=document.getElementById('__vnt_dbg');"
+        "if(!d){d=document.createElement('div');d.id='__vnt_dbg';"
+        "d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:2147483647;"
+        "background:#501313;color:#fff;font:12px/1.55 monospace;padding:8px 10px;"
+        "max-height:45vh;overflow:auto;white-space:pre-wrap';"
+        "(document.body||document.documentElement).appendChild(d);}"
+        "d.textContent='[vnt-nas 面板诊断]\\n'+L.slice(-10).join('\\n');"
+        "}catch(e){}}"
+        "window.addEventListener('error',function(e){"
+        "L.push('JS 错误: '+(e.message||'')+' @ '+(e.filename||'').split('/').pop());show();"
+        "},true);"
+        "window.addEventListener('unhandledrejection',function(e){"
+        "var r=e.reason;L.push('Promise 拒绝: '+((r&&(r.message||r))||''));show();});"
+        "try{localStorage.setItem('vnt-web-access-token',"
         + _json.dumps(token) + ");"
-        "}catch(e){}})();</script>"
+        "L.push('已写入令牌, 长度='+" + str(len(token)) + ");}"
+        "catch(e){L.push('写令牌失败: '+e.message);}"
+        "setTimeout(function(){"
+        "var base=location.pathname.replace(/\\/core\\/.*$/,'/core/');"
+        "fetch(base+'api/version',{cache:'no-store'})"
+        ".then(function(r){L.push('API /api/version → HTTP '+r.status);show();"
+        "return r.text().then(function(t){"
+        "L.push('  响应: '+t.slice(0,120));show();});})"
+        ".catch(function(e){L.push('API 请求失败: '+e.message);show();});"
+        "},700);"
+        "setTimeout(function(){"
+        "var n=document.getElementById('__vnt_dbg');"
+        "if(n&&!n.textContent)return;"
+        "if(!n){L.push('无报错，但界面仍空白 → 前端渲染未产出节点');show();}"
+        "},2600);"
+        "})();</script>"
     )
 
     # 插在 <head> 之后，确保早于应用脚本执行
