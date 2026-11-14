@@ -232,7 +232,6 @@ def save_bind(host):
     except OSError as e:
         log("save bind failed: %s" % e)
     return host
-    return host
 
 
 # ---------------------------------------------------------------------------
@@ -776,14 +775,15 @@ def start_core():
             return False, "核心无法运行：%s" % info
 
         token = get_token()
-        # vnt2_web 固定只监听 127.0.0.1，不直接对外暴露：
-        # 对外统一由本应用反代到 /core/（同源），因此面板可被 iframe 内嵌，
-        # 也不会额外暴露端口、无须给它单独做访问控制。
+        # vnt2_web 的监听地址可配置（默认全部网卡）：
+        # 这样 19199 端口本身仍可直连访问，作为反代失效时的兜底通道。
+        # 反代走 /core/ 时用的是回环地址，与监听范围无关。
+        host = read_bind()
         env = dict(os.environ)
         env["VNT_WEB_TOKEN"] = token
         args = [
             CORE_BIN,
-            "--addr", "127.0.0.1:%d" % PORTS["VNT_WEB_PORT"],
+            "--addr", "%s:%d" % (host, PORTS["VNT_WEB_PORT"]),
             "--token", token,
         ]
         try:

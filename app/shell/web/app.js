@@ -484,6 +484,20 @@
     }).catch(function (e) { toast(e.message, true); });
   }
 
+  // 直连兜底：用核心自己的端口 + 令牌直接打开（绕过反代）
+  function openPanelDirect() {
+    req('/api/panel_direct').then(function (r) {
+      if (r.code !== 0) throw new Error(r.msg);
+      var d = r.data || {};
+      if (!d.url) {
+        toast('核心未运行或监听范围为仅本机，无法直连', true);
+        return;
+      }
+      window.open(d.url, '_blank');
+      toast('已用直连地址打开（绕过代理）');
+    }).catch(function (e) { toast(e.message, true); });
+  }
+
   function reloadFrame() {
     var f = $('coreFrame');
     if (f) {
@@ -499,19 +513,30 @@
   function watchFrame() {
     var f = $('coreFrame');
     var tip = $('frameTip');
-    if (!f) return;
+    if (!f || !tip) return;
     f.addEventListener('load', function () {
-      // 同源才能读 contentDocument；本代理是同源的，正常可读
+      var src = f.getAttribute('src') || '';
+      if (!src || src === 'about:blank') return;
+
+      // 同源才能读 contentDocument。读不到即跨源（或沙箱限制），
+      // 此时无法判断内容，但必须给出可操作提示，不能静默空白。
       var doc = null;
       try { doc = f.contentDocument; } catch (e) { doc = null; }
-      if (!doc || !tip) return;
+      if (!doc) {
+        tip.hidden = false;
+        tip.textContent = '面板已加载，但无法读取其内容（跨源或沙箱限制）。'
+          + '请点「在新窗口打开」直接查看；若那里正常，'
+          + '说明是飞牛窗口对 iframe 的限制。';
+        return;
+      }
+
       var txt = (doc.body && doc.body.innerText)
         ? doc.body.innerText.trim() : '';
-      var hasNode = doc.querySelector('div,table,form,section,main');
+      var hasNode = doc.querySelector('div,table,form,section,main,canvas');
       if (!doc.body || (!txt && !hasNode)) {
         tip.hidden = false;
         tip.textContent = '面板已加载但内容为空。请点「自检面板可用性」查看原因，'
-          + '或先确认核心已下载并启动。';
+          + '或先用「在新窗口打开」确认面板本身是否正常。';
       } else {
         tip.hidden = true;
       }
@@ -543,6 +568,17 @@
                    '请求 Host：' + (d.host || '—'),
                    '挂载前缀：' + (d.mount || '/'),
                    ''];
+
+      // 浏览器侧实测：服务端自检通过 ≠ 浏览器取得到。
+      // 这里由当前页面亲自 fetch 一次 /core/，能精确区分
+      // 「路径不可达」与「iframe 被限制」两种失败。
+      return browserProbe(d.panel_url).then(function (probeLines) {
+        lines = lines.concat(probeLines, ['']);
+        return { d: d, lines: lines };
+      });
+    }).then(function (res) {
+      var d = res.d;
+      var lines = res.lines;
       (d.items || []).forEach(function (it) {
         lines.push((it.ok ? '[正常] ' : '[问题] ') + it.name + ' —— ' + it.detail);
       });
@@ -552,13 +588,71 @@
       }
       out.hidden = false;
       out.textContent = lines.join('\n');
-      toast(bad.length ? ('发现 ' + bad.length + ' 个问题') : '自检通过', !!bad.length);
+      toast(bad.length ? ('发现 ' + bad.length + ' 个问题') : '自检通过',
+            !!bad.length);
     }).catch(function (e) {
       out.hidden = false;
       out.textContent = '自检失败：' + e.message;
     }).then(function () {
       b.disabled = false; b.textContent = '自检面板可用性';
     });
+  }
+
+  // 由浏览器实测 /core/ 是否可达，并读回关键特征
+  function browserProbe(panelUrl) {
+    var url = panelUrl || '/core/';
+    var lines = ['— 浏览器侧实测 —'];
+    return fetch(url, { cache: 'no-store' })
+      .then(function (r) {
+        lines.push('取 ' + url + ' → HTTP ' + r.status);
+        return r.text().then(function (t) {
+          lines.push('返回 ' + t.length + ' 字节');
+          var hasFlag = t.indexOf('__VNT_DESKTOP__') !== -1;
+          lines.push('含桌面标志：' + (hasFlag ? '是' : '否'));
+
+          // 面板是 Vue 单页应用：真正的界面由 JS 渲染。
+          // 因此必须确认「页面引用的资源」都能取到，否则就是白屏。
+          var refs = [];
+          var re = /(?:src|href)="([^"]+\/assets\/[^"]+)"/g;
+          var m;
+          while ((m = re.exec(t)) !== null) refs.push(m[1]);
+
+          if (!refs.length) {
+            lines.push('⚠ 页面里没找到 assets 资源引用');
+            lines.push('   → 说明拿到的不是面板页面（可能是错误页/登录页）');
+            return lines;
+          }
+          lines.push('页面引用资源 ' + refs.length + ' 个');
+
+          // 逐个实测这些资源能否取到（这是判断 JS 是否可加载的关键）
+          return Promise.all(refs.slice(0, 4).map(function (u) {
+            return fetch(u, { cache: 'no-store' })
+              .then(function (rr) {
+                return '  资源 ' + u.split('/').pop()
+                  + ' → HTTP ' + rr.status
+                  + (rr.status === 200 ? ' ✓' : ' ✗');
+              })
+              .catch(function (e) {
+                return '  资源 ' + u.split('/').pop()
+                  + ' → 失败 ✗（' + e.message + '）';
+              });
+          })).then(function (rs) {
+            lines = lines.concat(rs);
+            var allOk = rs.every(function (s) {
+              return s.indexOf('HTTP 200') !== -1;
+            });
+            lines.push(allOk
+              ? '✓ 资源均可取，若仍空白则是 JS 运行时报错或 iframe 限制'
+              : '⚠ 有资源取不到，面板必然白屏（上面对应项的路径有问题）');
+            return lines;
+          });
+        });
+      })
+      .catch(function (e) {
+        lines.push('取 ' + url + ' 失败：' + e.message);
+        lines.push('⚠ 浏览器无法访问该路径，内嵌/新窗口都会空白');
+        return lines;
+      });
   }
 
   /* ---------------- 日志 ---------------- */
@@ -590,6 +684,7 @@
     $('btnSaveBind').addEventListener('click', saveBind);
     $('btnDiag').addEventListener('click', runDiag);
     $('btnCopyPanel').addEventListener('click', copyPanelUrl);
+    $('btnOpenDirect').addEventListener('click', openPanelDirect);
     $('btnReloadFrame').addEventListener('click', reloadFrame);
   }
 

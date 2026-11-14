@@ -243,16 +243,15 @@ def test_panel_url():
 
 
 def test_architecture():
-    """架构约束：核心固定回环，面板由本应用反代到 /core/。"""
-    print("7) 架构约束（核心回环 + 同源反代）")
+    """架构约束：核心监听可配置（兜底直连），面板另经 /core/ 反代。"""
+    print("7) 架构约束（反代 + 直连兜底）")
     srv = open(os.path.join(ROOT, "app", "shell", "shell_server.py"),
                encoding="utf-8").read()
-    check("核心固定绑定 127.0.0.1",
-          '"--addr", "127.0.0.1:%d"' in srv)
-    check("核心不再用可配置 bind",
-          '"--addr", "%s:%d" % (host' not in srv)
-    check("bind 用于面板代理监听范围",
-          "面板代理的监听范围" in srv or "面板代理" in srv)
+    # 核心监听地址保持可配置：反代失效时 19199 仍可直连作为兜底
+    check("核心监听地址可配置（bind）",
+          '"--addr", "%s:%d" % (host' in srv)
+    check("bind 默认全部网卡",
+          'return "0.0.0.0"' in srv)
     check("存在 http_raw（代理用）", "def http_raw" in srv)
     check("http_raw 显式禁用代理（本机直连）",
           "ProxyHandler({})" in srv)
@@ -261,6 +260,7 @@ def test_architecture():
              encoding="utf-8").read()
     check("PROXY_PREFIX 指向 /core", 'PROXY_PREFIX = "/core"' in h)
     check("实现 _proxy_panel", "def _proxy_panel" in h)
+    check("提供直连兜底接口", "/api/panel_direct" in h)
 
     main = open(os.path.join(ROOT, "app", "shell", "shell_main.py"),
                 encoding="utf-8").read()
