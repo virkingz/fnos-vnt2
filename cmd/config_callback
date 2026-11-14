@@ -1,0 +1,48 @@
+#!/bin/bash
+# 配置变更后：仅应用面板端口。其余设置在管理页「访问设置」中调整。
+set -u
+
+: "${TRIM_APPDEST:=/var/apps/vnt-nas/target}"
+: "${TRIM_PKGVAR:=/var/apps/vnt-nas/var}"
+: "${TRIM_PKGETC:=/var/apps/vnt-nas/etc}"
+: "${TRIM_PKGTMP:=/var/apps/vnt-nas/tmp}"
+: "${TRIM_TEMP_LOGFILE:=${TRIM_PKGTMP}/error.log}"
+: "${TRIM_APPNAME:=vnt-nas}"
+
+LIB="${TRIM_APPDEST}/shell/lib.sh"
+if [ ! -f "$LIB" ]; then
+    echo "缺少组件: ${LIB}" > "${TRIM_TEMP_LOGFILE}" 2>/dev/null
+    exit 1
+fi
+# shellcheck disable=SC1090
+. "$LIB"
+
+vnt_paths
+vnt_ensure_dirs
+vnt_load_ports
+
+CHANGED=0
+
+# 面板端口：新值合法且不同于当前值时更新
+if [ -n "${wizard_web_port:-}" ]; then
+    case "${wizard_web_port}" in
+    '' | *[!0-9]*) vnt_log "config_callback: 忽略非数字端口值" ;;
+    *)
+        if [ "${wizard_web_port}" != "${PANEL_PORT}" ]; then
+            PANEL_PORT="${wizard_web_port}"
+
+            CHANGED=1
+        fi
+        ;;
+    esac
+fi
+
+vnt_save_ports
+
+if [ "$CHANGED" = "1" ]; then
+    vnt_log "config_callback: panel port -> ${PANEL_PORT}, restart needed"
+else
+    vnt_log "config_callback: no port change"
+fi
+
+exit 0

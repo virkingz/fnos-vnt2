@@ -1,0 +1,41 @@
+#!/bin/bash
+# 升级后：补齐新文件权限，保留用户数据与已下载核心。
+# 若 fpk 内未携带新核心，则保留原有核心二进制（不覆盖）。
+set -u
+
+: "${TRIM_APPDEST:=/var/apps/vnt-nas/target}"
+: "${TRIM_PKGVAR:=/var/apps/vnt-nas/var}"
+: "${TRIM_PKGETC:=/var/apps/vnt-nas/etc}"
+: "${TRIM_PKGTMP:=/var/apps/vnt-nas/tmp}"
+: "${TRIM_TEMP_LOGFILE:=${TRIM_PKGTMP}/error.log}"
+: "${TRIM_APPNAME:=vnt-nas}"
+
+LIB="${TRIM_APPDEST}/shell/lib.sh"
+[ -f "$LIB" ] || exit 0
+# shellcheck disable=SC1090
+. "$LIB"
+
+vnt_paths
+vnt_ensure_dirs
+chmod +x "${TRIM_APPDEST}"/cmd/* 2>/dev/null || true
+chmod +x "$(vnt_bin_dir)"/vnt2_web 2>/dev/null || true
+
+# 端口保留旧值，仅在缺失时补默认（升级不改变用户已配置的端口）
+if [ ! -f "$(vnt_port_file)" ]; then
+    PANEL_PORT="${PANEL_PORT_DEFAULT}"
+    VNT_WEB_PORT="${VNT_WEB_PORT_DEFAULT}"
+    vnt_save_ports
+fi
+
+# 若核心缺失（例如换机/被清理），重新拉取
+if [ ! -x "$(vnt_core_bin)" ]; then
+    ver="$(vnt_latest_version || true)"
+    if [ -n "$ver" ]; then
+        vnt_install_core "$ver" || vnt_log "WARN: upgrade 后核心缺失且下载失败"
+    else
+        vnt_log "WARN: upgrade 后核心缺失，且无法查询最新版本"
+    fi
+fi
+
+vnt_log "upgrade_callback done (old=${TRIM_OLD_APPVER:-?})"
+exit 0

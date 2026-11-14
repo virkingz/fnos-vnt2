@@ -1,0 +1,25 @@
+#!/bin/bash
+# 安装前：环境探测。这里只警告、不阻断安装，
+# 避免因环境细节导致应用装不上（装不上就什么都做不了）。
+
+: "${TRIM_TEMP_LOGFILE:=/tmp/vnt-nas-install-init.log}"
+
+LOG="${TRIM_TEMP_LOGFILE%/*}/install_init.log"
+mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+{
+    echo "=== $(date '+%Y-%m-%d %H:%M:%S') install_init ==="
+    echo "arch=$(uname -m)"
+    echo "tun_device=$([ -e /dev/net/tun ] && echo yes || echo no)"
+} >> "$LOG" 2>/dev/null
+
+case "$(uname -m)" in
+x86_64 | amd64) ;;
+aarch64 | arm64) ;;
+armv7l | armv6l) ;;
+*)
+    echo "注意：当前架构 $(uname -m) 可能没有 VNT 官方预编译包，安装后可能无法下载核心。" >> "$LOG"
+    ;;
+esac
+
+# 始终放行：真正的问题在安装后由管理页明确提示
+exit 0

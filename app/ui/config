@@ -1,0 +1,24 @@
+{
+    ".url": {
+        "vnt-nas.main": {
+            "title": "VNT 组网",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "",
+            "gatewayPrefix": "/app/vnt-nas",
+            "gatewaySocket": "app.sock",
+            "url": "/app/vnt-nas",
+            "allUsers": false
+        },
+        "vnt-nas.panel": {
+            "title": "VNT 组网面板",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "",
+            "gatewayPrefix": "/app/vnt-nas",
+            "gatewaySocket": "app.sock",
+            "url": "/app/vnt-nas/#panel",
+            "allUsers": false
+        }
+    }
+}

@@ -1,0 +1,23 @@
+# 构建中间产物
+build/
+__pycache__/
+*.pyc
+*.pyo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 打包临时文件
+*.bak
+*.new
+*.download
+
+# 本地测试数据
+/testvar/
+/proxytest/
+/embedtest/
+/vertest/
+/mounttest/
+
+# 注意：*.fpk 不忽略，产物需要提交以便用户直接下载

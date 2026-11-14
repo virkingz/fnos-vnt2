@@ -1,0 +1,44 @@
+#!/bin/bash
+# 安装后：初始化目录、保存端口与访问令牌、尝试下载核心二进制。
+# 核心下载失败不阻断安装（管理页可重试）。
+# 注意：组网配置由 vnt2_web 网页自己管理，这里不生成。
+
+: "${TRIM_APPDEST:=/var/apps/vnt-nas/target}"
+: "${TRIM_PKGVAR:=/var/apps/vnt-nas/var}"
+: "${TRIM_PKGETC:=/var/apps/vnt-nas/etc}"
+: "${TRIM_PKGTMP:=/var/apps/vnt-nas/tmp}"
+: "${TRIM_TEMP_LOGFILE:=${TRIM_PKGTMP}/error.log}"
+: "${TRIM_APPNAME:=vnt-nas}"
+
+LIB="${TRIM_APPDEST}/shell/lib.sh"
+if [ ! -f "$LIB" ]; then
+    echo "缺少组件: ${LIB}" > "${TRIM_TEMP_LOGFILE}" 2>/dev/null
+    exit 1
+fi
+# shellcheck disable=SC1090
+. "$LIB"
+
+vnt_paths
+vnt_ensure_dirs
+
+# --- 面板端口（安装时唯一需要配置的项）---
+: "${wizard_web_port:=${PANEL_PORT_DEFAULT}}"
+case "${wizard_web_port}" in
+'' | *[!0-9]*) wizard_web_port="${PANEL_PORT_DEFAULT}" ;;
+esac
+PANEL_PORT="${wizard_web_port}"
+# vnt2_web 内部端口固定，不对外暴露
+VNT_WEB_PORT="${VNT_WEB_PORT_DEFAULT}"
+vnt_save_ports
+
+# --- 访问令牌：安装时自动生成，用户可稍后在管理页修改 ---
+vnt_gen_token
+vnt_log "install_callback: token generated ($(vnt_token_hint))"
+
+# --- 核心不在此阶段下载 ---
+# 安装只负责把壳装好；核心由用户在管理页点「检查更新 / 下载核心」获取。
+# 这样安装过程不依赖外网，避免网络问题导致装不上。
+chmod 0755 "$(vnt_bin_dir)" 2>/dev/null || true
+vnt_log "install_callback: done. 核心待用户在管理页下载"
+
+exit 0

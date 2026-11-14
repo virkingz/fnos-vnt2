@@ -1,0 +1,21 @@
+#!/bin/bash
+# 卸载后：根据用户选择决定是否保留数据目录（配置、已下载核心、日志）。
+set -u
+
+: "${TRIM_PKGVAR:=/var/apps/vnt-nas/var}"
+: "${TRIM_PKGTMP:=/var/apps/vnt-nas/tmp}"
+: "${TRIM_TEMP_LOGFILE:=${TRIM_PKGTMP}/error.log}"
+
+# 向导变量：keep = 保留数据，delete = 一并清除
+ACTION="${wizard_data_action:-keep}"
+
+if [ "$ACTION" = "delete" ]; then
+    rm -rf "${TRIM_PKGVAR}/bin" \
+           "${TRIM_PKGVAR}/vnt_config" \
+           "${TRIM_PKGVAR}/cache" \
+           "${TRIM_PKGVAR}/log" \
+           "${TRIM_PKGVAR}"/*.pid \
+           "${TRIM_PKGVAR}/ports.env" 2>/dev/null || true
+fi
+
+exit 0
