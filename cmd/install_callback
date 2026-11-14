@@ -21,14 +21,46 @@ fi
 vnt_paths
 vnt_ensure_dirs
 
-# --- 面板端口（安装时唯一需要配置的项）---
+# --- 端口：管理页端口 + 组网面板端口 ---
+# 管理页端口：打开「VNT 组网」时访问的端口
 : "${wizard_web_port:=${PANEL_PORT_DEFAULT}}"
 case "${wizard_web_port}" in
 '' | *[!0-9]*) wizard_web_port="${PANEL_PORT_DEFAULT}" ;;
 esac
 PANEL_PORT="${wizard_web_port}"
-# vnt2_web 内部端口固定，不对外暴露
-VNT_WEB_PORT="${VNT_WEB_PORT_DEFAULT}"
+
+# 组网面板端口：vnt2_web 自己的端口，桌面的「VNT 组网面板」图标指向它
+: "${wizard_panel_port:=${VNT_WEB_PORT_DEFAULT}}"
+case "${wizard_panel_port}" in
+'' | *[!0-9]*) wizard_panel_port="${VNT_WEB_PORT_DEFAULT}" ;;
+esac
+VNT_WEB_PORT="${wizard_panel_port}"
+
+# 两个端口不能相同，否则会互相抢占
+if [ "${PANEL_PORT}" = "${VNT_WEB_PORT}" ]; then
+    vnt_log "install_callback: 两个端口相同，面板端口回退为默认 ${VNT_WEB_PORT_DEFAULT}"
+    VNT_WEB_PORT="${VNT_WEB_PORT_DEFAULT}"
+fi
+
+# 端口范围兜底（向导已限制 1-65535，这里防止绕过向导直接传参）
+vnt_port_ok() {
+    case "$1" in
+    '' | *[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+if ! vnt_port_ok "${PANEL_PORT}"; then
+    vnt_log "install_callback: 管理页端口 ${PANEL_PORT} 非法，回退默认"
+    PANEL_PORT="${PANEL_PORT_DEFAULT}"
+fi
+if ! vnt_port_ok "${VNT_WEB_PORT}"; then
+    vnt_log "install_callback: 面板端口 ${VNT_WEB_PORT} 非法，回退默认"
+    VNT_WEB_PORT="${VNT_WEB_PORT_DEFAULT}"
+fi
+if [ "${PANEL_PORT}" = "${VNT_WEB_PORT}" ]; then
+    PANEL_PORT="${PANEL_PORT_DEFAULT}"
+fi
+
 vnt_save_ports
 
 # --- 访问令牌：安装时自动生成，用户可稍后在管理页修改 ---

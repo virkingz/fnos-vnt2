@@ -114,15 +114,16 @@
     </div>
 
     <div class="card">
-      <h2>核心监听范围</h2>
+      <h2>组网面板监听范围</h2>
       <p class="hint">
-        控制 vnt2_web 自身监听在哪个地址。默认「仅本机」时，面板经本应用代理访问，更安全。<br>
-        改为「全部网卡」后，除代理外还可以用 <span class="mono" id="directUrlHint">http://NAS地址:19199</span> 直接访问。
+        控制 <strong>vnt2_web</strong>（组网面板）监听在哪个地址。<br>
+        组网面板由 vnt2_web 以自己的端口独立提供，桌面上的「VNT 组网面板」图标
+        直接打开它；改这里会影响该图标与跳转是否能从其它设备访问。
       </p>
       <div class="row">
         <select id="f_bind" style="max-width:440px">
-          <option value="127.0.0.1">仅本机（127.0.0.1）— 经本应用代理访问</option>
-          <option value="0.0.0.0">全部网卡（0.0.0.0）— 可直连访问面板</option>
+          <option value="0.0.0.0">全部网卡（0.0.0.0）— 局域网内均可打开面板</option>
+          <option value="127.0.0.1">仅本机（127.0.0.1）— 只有本机能打开面板</option>
         </select>
         <button class="btn" id="btnSaveBind">保存并重启核心</button>
       </div>
@@ -175,31 +176,25 @@
   <section class="pane" id="pane-panel">
     <div class="card">
       <h2>组网面板</h2>
-      <p class="hint">组网的添加、启动、查看节点与路由，全部在 vnt2_web 自带页面完成。</p>
+      <p class="hint">组网的添加、启动、查看节点与路由，全部在 vnt2_web 自带页面完成。
+        该页面由 vnt2_web 以自己的端口独立提供服务，桌面上的「VNT 组网面板」图标
+        打开的是同一个页面。</p>
       <dl class="kv">
         <div><dt>面板地址</dt><dd class="mono" id="panelUrl">—</dd></div>
         <div><dt>状态</dt><dd id="panelReady">—</dd></div>
       </dl>
       <div class="row">
-        <button class="btn primary" id="btnOpenPanel">在新窗口打开</button>
+        <button class="btn primary" id="btnOpenPanel">打开组网面板</button>
+        <button class="btn" id="btnCopyPanel">复制面板地址</button>
         <button class="btn" id="btnStartCore2">启动核心</button>
-        <button class="btn" id="btnReloadFrame">重新加载内嵌页</button>
       </div>
+      <p class="hint">打开时会自动带上访问令牌，无需手工粘贴登录。</p>
     </div>
     <div class="card">
-      <h2>内嵌面板</h2>
-      <p class="hint">下面是 vnt2_web 的原生页面。它作为独立 Web 服务运行（HTTP），
-        因此若管理页是 <span class="mono">https://</span> 访问的，
-        浏览器会阻止内嵌（混合内容），这是浏览器的安全策略。<br>
-        此时请点「在新窗口打开」——新标签页不受此限制。</p>
-      <div id="frameTip" class="frametip" hidden></div>
-      <div class="frame-wrap">
-        <iframe id="coreFrame" src="about:blank" title="vnt2_web 组网面板"
-                referrerpolicy="no-referrer"></iframe>
-      </div>
+      <h2>面板自检</h2>
+      <p class="hint">逐项检查核心、令牌、端口与监听范围，帮助定位面板打不开的原因。</p>
       <div class="row">
         <button class="btn" id="btnDiag">自检面板可用性</button>
-        <button class="btn" id="btnCopyPanel">复制面板地址</button>
       </div>
       <pre class="log" id="diagText" hidden></pre>
     </div>

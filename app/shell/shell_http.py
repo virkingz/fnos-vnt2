@@ -48,12 +48,12 @@ def _rm(path):
 
 
 def panel_url_for(handler, with_token=True):
-    """构造 vnt2_web 面板的真实地址。
+    """构造组网面板地址（vnt2_web 自己的端口）。
 
-    vnt2_web 独立占用 VNT_WEB_PORT，页面必须用它自己的端口访问
-    （前端资源与 API 都是根路径，无法挂在子路径下）。
+    面板由 vnt2_web 独立占用 VNT_WEB_PORT 对外提供，页面必须用它自己的
+    端口访问：前端资源与 API 都是根路径，无法挂在子路径下。
 
-    它原生支持 /?token=xxx：前端会读取该参数、写入 localStorage
+    vnt2_web 原生支持 /?token=xxx：前端会读取该参数、写入 localStorage
     并自动进入控制台，随后把地址栏里的 token 抹掉。
     因此这里直接带上令牌，用户无需再手工粘贴。
     """
@@ -476,17 +476,18 @@ class Handler(BaseHTTPRequestHandler):
                                     "data": {"file_name": name, "text": text}})
 
         if path == "/api/bind" and method == "POST":
-            # 设置核心监听范围；vnt2_web 需重启才能在新地址上生效
+            # 设置 vnt2_web 的监听范围（仅本机 / 全部网卡）。
+            # 组网面板由它自己的端口对外提供，因此改完需重启核心生效。
             if not self._is_admin():
                 return self._json(403, {"code": 1, "msg": "需要管理员权限"})
             body = self._body()
-            host = S.save_bind(body.get("bind") or "127.0.0.1")
+            host = S.save_bind(body.get("bind") or "0.0.0.0")
             restarted = ""
             if S.core_running():
                 S.stop_core()
                 restarted = S.start_core()[1]
-            tip = ("核心已监听全部网卡" if host == "0.0.0.0"
-                   else "核心仅监听本机回环")
+            tip = ("核心已监听全部网卡（局域网可直接打开组网面板）"
+                   if host == "0.0.0.0" else "核心仅监听本机回环")
             return self._json(200, {
                 "code": 0,
                 "msg": tip + (("；" + restarted) if restarted else ""),
@@ -499,13 +500,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, dict(self._diag(raw_path)))
 
         if path == "/api/panel":
-            # 面板地址 = vnt2_web 自己的端口。
-            # 它的前端资源编译在 ELF 内、使用根路径与拼接片段，
-            # 无法经子路径反代（会连机器码一起改坏），因此独立端口访问。
+            # 面板地址 = vnt2_web 自己的端口（它独立对外提供组网面板）。
             #
             # vnt2_web 原生支持 /?token=xxx：前端会读取该参数、写入
             # localStorage 并自动进入控制台。因此返回带令牌的地址，
-            # 内嵌与新窗口打开都无需再手工粘贴令牌；
+            # 跳转打开无需再手工粘贴令牌；
             # 另给出不含令牌的地址用于界面展示，避免令牌显示在页面上。
             return self._json(200, {"code": 0, "msg": "success",
                                     "data": {
@@ -593,7 +592,7 @@ class Handler(BaseHTTPRequestHandler):
         return "%s://%s%s" % (scheme, host, path)
 
     def _panel_direct_url(self, bind=None):
-        """vnt2_web 直连地址（仅当监听范围为全部网卡时可用）。"""
+        """组网面板的直连地址（监听范围为全部网卡时局域网可用）。"""
         bind = bind or S.read_bind()
         if bind != "0.0.0.0":
             return ""
@@ -628,21 +627,21 @@ class Handler(BaseHTTPRequestHandler):
             else "127.0.0.1:%d 连不上，核心可能启动失败"
                  % S.PORTS["VNT_WEB_PORT"])
 
-        # 反向代理能否真正取到面板首页
-        proxy_ok, proxy_detail = False, ""
+        # 面板端口能否取到首页（组网面板由 vnt2_web 自己的端口提供）
+        panel_ok, panel_detail = False, ""
         if core_up and has_token:
             try:
                 code, body = S.http_get(
                     "http://127.0.0.1:%d/" % S.PORTS["VNT_WEB_PORT"], timeout=8,
                     headers={"Authorization": "Bearer %s" % S.get_token()})
-                proxy_ok = (code == 200 and body)
-                proxy_detail = ("代理可访问核心首页（%d 字节）" % len(body)
-                                if proxy_ok else "核心首页返回 HTTP %s" % code)
+                panel_ok = (code == 200 and body)
+                panel_detail = ("面板首页可访问（%d 字节）" % len(body)
+                                if panel_ok else "面板首页返回 HTTP %s" % code)
             except Exception as e:  # noqa: BLE001
-                proxy_detail = "代理访问核心失败：%s" % e
+                panel_detail = "访问面板失败：%s" % e
         else:
-            proxy_detail = "核心未运行或缺少令牌，跳过"
-        add("管理服务可代理核心", proxy_ok, proxy_detail)
+            panel_detail = "核心未运行或缺少令牌，跳过"
+        add("组网面板可访问", panel_ok, panel_detail)
 
         # 网关挂载前缀是否正确识别
         add("挂载前缀识别", True,
@@ -650,17 +649,18 @@ class Handler(BaseHTTPRequestHandler):
 
         # 面板地址（展示用，不含令牌）
         panel_url = panel_url_bare(self)
-        add("面板地址", True, panel_url + "（内嵌/跳转时会自动带令牌）")
+        add("面板地址", True, panel_url + "（跳转打开时会自动带令牌）")
 
-        # 若监听范围为回环，说明内嵌依赖代理；放开 0.0.0.0 可绕过 iframe 限制
+        # vnt2_web 的监听范围
         bind = S.read_bind()
         add("核心监听范围", True,
-            "全部网卡（0.0.0.0），可直连 %s" % self._panel_direct_url()
+            "全部网卡（0.0.0.0），局域网可直接打开 %s"
+            % self._panel_direct_url()
             if bind == "0.0.0.0"
-            else "仅本机（127.0.0.1），内嵌依赖反向代理")
+            else "仅本机（127.0.0.1），仅这台机器可访问")
 
-        all_ok = all(i["ok"] for i in items
-                     if i["name"] not in ("核心监听范围", "挂载前缀识别", "面板地址"))
+        skip = ("挂载前缀识别", "面板地址", "核心监听范围")
+        all_ok = all(i["ok"] for i in items if i["name"] not in skip)
         return {
             "code": 0 if all_ok else 1,
             "msg": "自检通过" if all_ok else "自检发现问题，详见各项",

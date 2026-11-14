@@ -23,24 +23,45 @@ vnt_load_ports
 
 CHANGED=0
 
-# 面板端口：新值合法且不同于当前值时更新
-if [ -n "${wizard_web_port:-}" ]; then
-    case "${wizard_web_port}" in
-    '' | *[!0-9]*) vnt_log "config_callback: 忽略非数字端口值" ;;
-    *)
-        if [ "${wizard_web_port}" != "${PANEL_PORT}" ]; then
-            PANEL_PORT="${wizard_web_port}"
-
-            CHANGED=1
-        fi
-        ;;
+# 端口范围校验（向导已限制 1-65535，这里防止绕过向导直接传参）
+vnt_port_ok() {
+    case "$1" in
+    '' | *[!0-9]*) return 1 ;;
     esac
+    [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+# 管理页端口：新值合法且不同于当前值时更新
+if [ -n "${wizard_web_port:-}" ]; then
+    if ! vnt_port_ok "${wizard_web_port}"; then
+        vnt_log "config_callback: 忽略非法的管理页端口 ${wizard_web_port}"
+    elif [ "${wizard_web_port}" != "${PANEL_PORT}" ]; then
+        PANEL_PORT="${wizard_web_port}"
+        CHANGED=1
+    fi
+fi
+
+# 组网面板端口：vnt2_web 自己的端口
+if [ -n "${wizard_panel_port:-}" ]; then
+    if ! vnt_port_ok "${wizard_panel_port}"; then
+        vnt_log "config_callback: 忽略非法的面板端口 ${wizard_panel_port}"
+    elif [ "${wizard_panel_port}" != "${VNT_WEB_PORT}" ]; then
+        VNT_WEB_PORT="${wizard_panel_port}"
+        CHANGED=1
+    fi
+fi
+
+# 两个端口不能相同
+if [ "${PANEL_PORT}" = "${VNT_WEB_PORT}" ]; then
+    vnt_log "config_callback: 两端口冲突，面板端口回退为默认值"
+    VNT_WEB_PORT="${VNT_WEB_PORT_DEFAULT}"
+    CHANGED=1
 fi
 
 vnt_save_ports
 
 if [ "$CHANGED" = "1" ]; then
-    vnt_log "config_callback: panel port -> ${PANEL_PORT}, restart needed"
+    vnt_log "config_callback: port changed (panel=${PANEL_PORT}, web=${VNT_WEB_PORT}), restart needed"
 else
     vnt_log "config_callback: no port change"
 fi

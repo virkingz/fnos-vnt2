@@ -13,11 +13,10 @@
         "vnt-nas.panel": {
             "title": "VNT 组网面板",
             "icon": "images/icon_{0}.png",
-            "type": "iframe",
-            "protocol": "",
-            "gatewayPrefix": "/app/vnt-nas",
-            "gatewaySocket": "app.sock",
-            "url": "/app/vnt-nas/#panel",
+            "type": "url",
+            "protocol": "http",
+            "port": "${wizard_panel_port}",
+            "url": "/",
             "allUsers": false
         }
     }

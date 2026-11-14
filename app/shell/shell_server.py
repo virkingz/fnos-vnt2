@@ -48,6 +48,11 @@ CORE_LOG = os.path.join(LOG_DIR, "vnt2_web.log")
 UPDATE_LOG = os.path.join(LOG_DIR, "update.log")
 MAIN_LOG = os.path.join(LOG_DIR, "main.log")
 
+# HTTPS 面板代理所需的证书（自签，自动生成）
+TLS_DIR = os.path.join(PKGVAR, "tls")
+TLS_CERT = os.path.join(TLS_DIR, "panel.crt")
+TLS_KEY = os.path.join(TLS_DIR, "panel.key")
+
 WEB_DIR = os.path.join(APPDEST, "shell", "web")
 SOCK_PATH = os.path.join(APPDEST, "app.sock")
 GATEWAY_PREFIX = "/app/%s" % APPNAME
@@ -61,7 +66,8 @@ LATEST_JSON = "https://github.com/%s/releases/latest/download/latest.json" % REP
 
 # 端口默认值：PANEL_PORT 是用户唯一需要配置的端口
 PANEL_PORT_DEFAULT = 19099
-VNT_WEB_PORT_DEFAULT = 19199   # vnt2_web 内部端口，仅回环
+# vnt2_web 端口：组网面板直接用它对外提供服务（桌面第二个图标即指向此端口）
+VNT_WEB_PORT_DEFAULT = 19199
 
 UA = "vnt-nas-fpk/1.0"
 
@@ -198,16 +204,15 @@ def curl_proxy_args():
 
 
 # ---------------------------------------------------------------------------
-# 核心监听范围：默认只在本机回环（由本服务反代，更安全）；
-# 也可放开为 0.0.0.0，便于用 http://NAS:端口 直接访问面板。
+# vnt2_web 的监听范围。
+#
+# 组网面板直接由 vnt2_web 以自己的端口对外提供（桌面第二个图标即指向它），
+# 因此它需要对外监听：
+#   0.0.0.0   —— 局域网内均可打开组网面板（默认）
+#   127.0.0.1 —— 只在本机，需经管理页的反向代理访问（更安全）
 # ---------------------------------------------------------------------------
 def read_bind():
-    """核心监听地址。
-
-    默认 0.0.0.0：vnt2_web 的前端资源是编译进 ELF 的（RustEmbed），
-    JS 里的 /api/... 是拼接片段，做子路径反代改写会连机器码一起改坏，
-    因此只能让它独立端口对外提供服务。
-    """
+    """vnt2_web 的监听地址。默认 0.0.0.0（局域网可直接打开面板）。"""
     try:
         with open(BIND_FILE, "r", encoding="utf-8") as f:
             v = f.read().strip()
@@ -219,12 +224,14 @@ def read_bind():
 
 
 def save_bind(host):
+    """保存监听范围，返回最终生效值。"""
     host = "0.0.0.0" if str(host).strip() == "0.0.0.0" else "127.0.0.1"
     try:
         with open(BIND_FILE, "w", encoding="utf-8") as f:
             f.write(host)
     except OSError as e:
         log("save bind failed: %s" % e)
+    return host
     return host
 
 
@@ -734,10 +741,8 @@ def start_core():
             return False, "核心无法运行：%s" % info
 
         token = get_token()
-        # vnt2_web 始终只在回环监听：对外统一由管理页反代，
-        # 既避免额外暴露端口，也让面板无需单独处理鉴权。
-        # 监听地址：默认回环（由本服务反代）；用户可放开为 0.0.0.0，
-        # 便于直接用 http://NAS:面板端口 访问 vnt2_web 页面。
+        # vnt2_web 以自己的端口对外提供组网面板（桌面第二个图标直连它），
+        # 因此监听地址可配置：默认全部网卡，也可收紧为本机回环。
         host = read_bind()
         env = dict(os.environ)
         env["VNT_WEB_TOKEN"] = token

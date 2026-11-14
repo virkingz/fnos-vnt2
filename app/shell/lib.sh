@@ -11,10 +11,11 @@ VNT_REPO="vnt-dev/vnt"
 VNT_GITHUB_API="https://api.github.com/repos/${VNT_REPO}/releases/latest"
 VNT_GITHUB_DL="https://github.com/${VNT_REPO}/releases/download"
 # 端口模型：
-#   PANEL_PORT   —— 用户唯一需要配置的端口，对外提供管理页与组网面板
-#   内部端口     —— vnt2_web 只在回环监听，由壳反代，不直接暴露给用户
+#   PANEL_PORT   —— 用户配置的端口，提供管理页
+#   VNT_WEB_PORT —— vnt2_web 自己的端口，直接对外提供组网面板
+#                   （桌面第二个图标即指向此端口）
 PANEL_PORT_DEFAULT=19099
-VNT_WEB_PORT_DEFAULT=19199   # vnt2_web 内部端口（仅回环）
+VNT_WEB_PORT_DEFAULT=19199   # vnt2_web 端口（组网面板）
 SHELL_PORT_DEFAULT=19988     # 兼容旧配置：管理页内部回环监听
 
 # ---------------------------------------------------------------------------

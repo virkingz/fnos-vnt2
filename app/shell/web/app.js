@@ -100,15 +100,12 @@
       $('proxy').value = d.proxy || '';
     }
     if ($('f_bind') && document.activeElement !== $('f_bind')) {
-      $('f_bind').value = d.bind || '127.0.0.1';
-    }
-    if ($('directUrlHint')) {
-      $('directUrlHint').textContent = 'http://NAS地址:' + d.web_port;
+      $('f_bind').value = d.bind || '0.0.0.0';
     }
     if ($('directUrl')) {
       $('directUrl').textContent = (d.bind === '0.0.0.0')
-        ? ('当前可直连：http://NAS地址:' + d.web_port)
-        : '当前仅本机监听，面板请经本应用访问';
+        ? ('组网面板地址：http://NAS地址:' + d.web_port)
+        : '当前仅本机监听，组网面板只能在飞牛本机打开';
     }
     if ($('netPreview')) {
       var parts = [];
@@ -352,7 +349,7 @@
       });
   }
 
-  /* ---------------- 核心监听范围 ---------------- */
+  /* ---------------- 组网面板监听范围 ---------------- */
   function saveBind() {
     var v = $('f_bind').value;
     var b = $('btnSaveBind');
@@ -454,18 +451,8 @@
       $('panelUrl').textContent = d.display_url || d.url;
       $('panelReady').textContent = !d.has_token
         ? '尚未设置访问令牌，请先到「访问设置」设置'
-        : (d.core_running ? '核心运行中，已内嵌显示（自动登录）'
+        : (d.core_running ? '核心运行中，可打开面板（自动登录）'
                           : '核心未运行，请先启动核心');
-
-      checkMixedContent(d.display_url || d.url);
-
-      // 内嵌地址带令牌：vnt2_web 会自动登录，无需手工粘贴
-      var f = $('coreFrame');
-      if (f && d.core_running && d.has_token && d.url) {
-        if (f.getAttribute('src') !== d.url) f.src = d.url;
-      } else if (f && !d.core_running) {
-        f.src = 'about:blank';
-      }
     }).catch(function (e) {
       $('panelUrl').textContent = e.message;
       $('panelReady').textContent = '—';
@@ -486,13 +473,8 @@
       }
       // 带令牌打开，vnt2_web 会自动登录
       window.open(d.url, '_blank');
-      toast('已在新窗口打开组网面板（已自动带上令牌）');
+      toast('已打开组网面板（已自动带上令牌）');
     }).catch(function (e) { toast(e.message, true); });
-  }
-
-  function reloadFrame() {
-    loadPanelInfo();
-    toast('已重新加载内嵌面板');
   }
 
   function copyPanelUrl() {
@@ -507,20 +489,6 @@
         toast('面板地址：' + u);
       }
     }).catch(function (e) { toast(e.message, true); });
-  }
-
-  // 检测是否为混合内容场景（HTTPS 管理页 + HTTP 面板）
-  function checkMixedContent(url) {
-    var tip = $('frameTip');
-    if (!tip) return;
-    var pageHttps = location.protocol === 'https:';
-    var panelHttp = /^http:\/\//i.test(url || '');
-    if (pageHttps && panelHttp) {
-      tip.hidden = false;
-      tip.textContent = '当前管理页是 HTTPS，而组网面板是 HTTP，'
-        + '浏览器会阻止内嵌（混合内容）。请点「在新窗口打开」，'
-        + '或直接用「复制面板地址」在浏览器中访问。';
-    }
   }
 
   /* ---------------- 面板自检 ---------------- */
@@ -540,8 +508,6 @@
       var bad = (d.items || []).filter(function (x) { return !x.ok; });
       if (bad.length) {
         lines.push('', '建议：先处理上面标为「问题」的项。');
-        lines.push('若各项都正常但内嵌仍空白，多半是飞牛给应用窗口加了 iframe 限制，'
-          + '请改用「在新窗口打开」。');
       }
       out.hidden = false;
       out.textContent = lines.join('\n');
@@ -551,28 +517,6 @@
       out.textContent = '自检失败：' + e.message;
     }).then(function () {
       b.disabled = false; b.textContent = '自检面板可用性';
-    });
-  }
-
-  // 内嵌加载失败时给出提示，避免静默空白
-  function watchFrame() {
-    var f = $('coreFrame');
-    if (!f) return;
-    f.addEventListener('load', function () {
-      var tip = $('frameTip');
-      // 同源 iframe 才能访问 contentDocument
-      var doc = null;
-      try { doc = f.contentDocument; } catch (e) { doc = null; }
-      if (!doc) return;
-      var txt = (doc.body && doc.body.innerText) ? doc.body.innerText.trim() : '';
-      var empty = !doc.body || (!txt && !doc.querySelector('div,table,form'));
-      if (empty) {
-        tip.hidden = false;
-        tip.textContent = '内嵌页已加载但内容为空。可能是飞牛对应用窗口限制了嵌套，'
-          + '请点上方「在新窗口打开」，或先运行下方自检查看具体原因。';
-      } else {
-        tip.hidden = true;
-      }
     });
   }
 
@@ -598,7 +542,6 @@
     $('btnSavePort').addEventListener('click', savePort);
     $('btnOpenPanel').addEventListener('click', openPanel);
     $('btnUpload').addEventListener('click', uploadCore);
-    $('btnReloadFrame').addEventListener('click', reloadFrame);
     $('btnLog').addEventListener('click', loadLog);
     $('logName').addEventListener('change', loadLog);
     $('btnSaveNet').addEventListener('click', saveNet);
@@ -611,7 +554,6 @@
   function boot() {
     initTabs();
     bind();
-    watchFrame();
     refresh();
     loadPanelInfo();
     loadInstances();
