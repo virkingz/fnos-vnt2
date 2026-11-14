@@ -194,47 +194,49 @@ def rewrite_paths(text, prefix=PROXY_PREFIX):
     return _ABS_PATH_RE.sub(repl, text)
 
 
-def _inject_desktop_flag(html, token):
-    """向 vnt2_web 的 HTML 注入「桌面宿主」标志与令牌。
+def inject_token(html, token):
+    """向 vnt2_web 的 HTML 注入访问令牌（使其在新源下也能自动登录）。
 
     为什么需要
     ----------
     vnt2_web 的登录态存在 **localStorage**，而 localStorage 按「源」隔离：
     直连它自己的端口时令牌存在那个源；经本应用 /core/ 内嵌后是另一个源，
-    读不到令牌，前端就渲染 AccessGate 登录页（表现为内嵌区域只显示登录框）。
+    读不到令牌，前端便渲染 AccessGate 登录页（表现为空白）。
 
     二进制中的真实逻辑：
-        const At = !!globalThis.__VNT_DESKTOP__;   // 桌面宿主标志
+        const wr = url.searchParams.get("token") || "";
+        wr && localStorage.setItem("vnt-web-access-token", wr);
         const io = Y(At ? "" : wr || localStorage.getItem(lo) || "");
-        const Qr = Y(At || !!io.value);            // 有标志即视为已登录
 
-    即 vnt2_web 原生支持「桌面宿主」模式：只要 __VNT_DESKTOP__ 为真，
-    就跳过令牌校验。这里正是扮演桌面宿主，因此在 `<head>` 最前面注入该标志。
+    ⚠ 关键：**不能设置 globalThis.__VNT_DESKTOP__**。
+    该标志为真时令牌会被置空（`At ? "" : ...`），且它只是为「由宿主代发
+    请求」的桌面端准备的——那种场景下宿主通过 __VNT_API_REQUEST__ 钩子
+    接管全部 API，前端自己不再附加 Authorization。
+    我们并未接管 API，若设了该标志，所有请求都会因缺少令牌而 401，
+    前端随即登出，界面就是空白（曾据此误判为「免登录开关」）。
 
-    同时把令牌写入 localStorage 作为兜底：万一某版本不看该标志，
-    令牌已在，仍能自动放行。
+    因此这里只把令牌写入 localStorage，等价于 URL 带 ?token=xxx 的效果。
     """
     import json as _json
-    if "__VNT_DESKTOP__" in html:
+    if "vnt-web-access-token" in html:
+        return html
+    if not token:
         return html
 
-    tok = token or ""
     script = (
         "<script>(function(){try{"
-        "globalThis.__VNT_DESKTOP__=true;"
-        + ("localStorage.setItem('vnt-web-access-token',"
-           + _json.dumps(tok) + ");" if tok else "")
-        + "}catch(e){}})();</script>"
+        "localStorage.setItem('vnt-web-access-token',"
+        + _json.dumps(token) + ");"
+        "}catch(e){}})();</script>"
     )
 
-    # 尽量插在 <head> 之后，确保早于应用脚本执行
+    # 插在 <head> 之后，确保早于应用脚本执行
     lower = html.lower()
     idx = lower.find("<head")
     if idx != -1:
         end = html.find(">", idx)
         if end != -1:
             return html[:end + 1] + script + html[end + 1:]
-    # 没有 head：插在 <html> 后或最前面
     idx = lower.find("<html")
     if idx != -1:
         end = html.find(">", idx)
@@ -662,7 +664,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 text = rewrite_paths(data.decode("utf-8"), prefix)
                 if "text/html" in ctype:
-                    text = _inject_desktop_flag(text, S.get_token())
+                    text = inject_token(text, S.get_token())
                 data = text.encode("utf-8")
             except UnicodeDecodeError:
                 pass

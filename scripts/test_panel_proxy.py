@@ -132,10 +132,13 @@ def main():
     txt = body.decode("utf-8", "replace")
     check("首页 200", code == 200, code)
     check("含面板内容", "VNT PANEL" in txt, txt[:80])
-    check("已注入桌面宿主标志", "__VNT_DESKTOP__" in txt, txt[:150])
-    check("标志早于应用脚本",
-          txt.find("__VNT_DESKTOP__") < txt.find("assets/index-abc.js"))
-    check("已注入令牌兜底", "vnt-web-access-token" in txt, txt[:200])
+    check("已注入访问令牌", "vnt-web-access-token" in txt, txt[:200])
+    check("令牌脚本早于应用脚本",
+          txt.find("vnt-web-access-token") < txt.find("assets/index-abc.js"))
+    # 绝不能设 __VNT_DESKTOP__：该标志会让前端把令牌置空，
+    # 而我们并未接管 API，会导致所有请求 401 后登出（白屏根因）
+    check("未设 __VNT_DESKTOP__（会清空令牌）",
+          "__VNT_DESKTOP__" not in txt, txt[:300])
     check("资源已改写为 /core/assets/",
           'src="/core/assets/index-abc.js"' in txt, txt[:400])
     check("CSS 已改写",

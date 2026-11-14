@@ -607,8 +607,11 @@
         lines.push('取 ' + url + ' → HTTP ' + r.status);
         return r.text().then(function (t) {
           lines.push('返回 ' + t.length + ' 字节');
-          var hasFlag = t.indexOf('__VNT_DESKTOP__') !== -1;
-          lines.push('含桌面标志：' + (hasFlag ? '是' : '否'));
+          var hasTok = t.indexOf('vnt-web-access-token') !== -1;
+          lines.push('已注入访问令牌：' + (hasTok ? '是' : '否'));
+          if (!hasTok) {
+            lines.push('   ⚠ 未注入令牌，面板会停在登录页');
+          }
 
           // 面板是 Vue 单页应用：真正的界面由 JS 渲染。
           // 因此必须确认「页面引用的资源」都能取到，否则就是白屏。
