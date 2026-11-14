@@ -47,6 +47,15 @@ CORE_BIN = os.path.join(BIN_DIR, "vnt2_web")
 CORE_LOG = os.path.join(LOG_DIR, "vnt2_web.log")
 UPDATE_LOG = os.path.join(LOG_DIR, "update.log")
 MAIN_LOG = os.path.join(LOG_DIR, "main.log")
+SHELL_LOG = os.path.join(LOG_DIR, "shell.log")
+
+# 日志上限：单个文件超过 LOG_MAX_BYTES 即原地截断，只保留最近 LOG_KEEP_BYTES。
+# 为什么用「原地截断」而不是「改名轮转」：
+#   shell.log 由后端进程以 >> 追加、vnt2_web.log 由核心进程持有 fd 追加，
+#   改名会让写入方继续写旧 inode，轮转等于失效。
+#   而两者都是 O_APPEND 打开，原地截断后下一次写入自然落到新末尾，安全有效。
+LOG_MAX_BYTES = 512 * 1024
+LOG_KEEP_BYTES = 256 * 1024
 
 # HTTPS 面板代理所需的证书（自签，自动生成）
 TLS_DIR = os.path.join(PKGVAR, "tls")
@@ -81,10 +90,59 @@ for d in (BIN_DIR, CONF_DIR, LOG_DIR, CACHE_DIR):
 # ---------------------------------------------------------------------------
 # 日志
 # ---------------------------------------------------------------------------
+def _trim_log(path, max_bytes=None, keep_bytes=None):
+    """日志超过上限时原地截断，只保留尾部。
+
+    用「保留尾部」而非整体清空：出问题的现场往往在最后几屏，
+    截断后仍能看到最近的活动，同时把文件压回安全大小。
+
+    原地截断对 O_APPEND 写入方（后端进程、核心进程）是安全的——
+    它们持有的是同一个 inode，下次写入直接落到新末尾。
+    """
+    limit = LOG_MAX_BYTES if max_bytes is None else max_bytes
+    keep = LOG_KEEP_BYTES if keep_bytes is None else keep_bytes
+    try:
+        if os.path.getsize(path) <= limit:
+            return False
+    except OSError:
+        return False
+    try:
+        with open(path, "rb") as f:
+            f.seek(-keep, os.SEEK_END)
+            tail = f.read()
+        # 从换行处切开，避免留下半行
+        nl = tail.find(b"\n")
+        if 0 <= nl < len(tail) - 1:
+            tail = tail[nl + 1:]
+        with open(path, "wb") as f:
+            f.write(("[log trimmed: 仅保留最近 %d KB]\n"
+                     % (keep // 1024)).encode("utf-8"))
+            f.write(tail)
+        return True
+    except OSError:
+        return False
+
+
+def trim_logs():
+    """对全部日志做一次大小检查；返回被截断的文件名列表。"""
+    trimmed = []
+    for name, path in (("main", MAIN_LOG), ("update", UPDATE_LOG),
+                       ("shell", SHELL_LOG), ("core", CORE_LOG)):
+        if _trim_log(path):
+            trimmed.append(name)
+    return trimmed
+
+
 def _log(path, msg):
     try:
         with open(path, "a", encoding="utf-8") as f:
             f.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
+    except OSError:
+        pass
+    # 追加后检查大小（低频，开销可忽略）：只在超限时才真正读文件
+    try:
+        if os.path.getsize(path) > LOG_MAX_BYTES:
+            _trim_log(path)
     except OSError:
         pass
 
@@ -894,6 +952,10 @@ def _watcher():
     while True:
         time.sleep(10)
         try:
+            # 日志体积巡检：shell.log / vnt2_web.log 由外部进程持有 fd 追加，
+            # 不经过 _log()，因此这里统一兜底（仅是 stat，开销可忽略）。
+            trim_logs()
+
             marker = os.path.join(PKGVAR, ".autostart")
             if not os.path.isfile(marker):
                 continue

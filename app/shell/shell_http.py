@@ -275,6 +275,13 @@ def jdump(obj):
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
+def _file_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "vnt-nas-shell/1.0"
     protocol_version = "HTTP/1.1"
@@ -611,12 +618,38 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/logs":
             name = (q.get("name") or ["main"])[0]
             files = {"main": S.MAIN_LOG, "update": S.UPDATE_LOG,
-                     "core": S.CORE_LOG}
+                     "shell": S.SHELL_LOG, "core": S.CORE_LOG}
             if name not in files:
                 return self._json(400, {"code": 1, "msg": "未知日志"})
             return self._json(200, {"code": 0, "msg": "success",
                                     "data": {"name": name,
+                                             "size": _file_size(files[name]),
+                                             "limit": S.LOG_MAX_BYTES,
                                              "text": S.tail(files[name], 300)}})
+
+        if path == "/api/logs_clear" and method == "POST":
+            # 手动清空全部日志（截断为 0，不做删除，避免持有 fd 的写入方错位）
+            if not self._is_admin():
+                return self._json(403, {"code": 1, "msg": "需要管理员权限"})
+            body = self._body()
+            which = (body.get("name") or "all").strip()
+            files = {"main": S.MAIN_LOG, "update": S.UPDATE_LOG,
+                     "shell": S.SHELL_LOG, "core": S.CORE_LOG}
+            if which != "all" and which not in files:
+                return self._json(400, {"code": 1, "msg": "未知日志"})
+            targets = (files.values() if which == "all"
+                       else [files[which]])
+            cleared = []
+            for p in targets:
+                try:
+                    with open(p, "wb"):
+                        pass
+                    cleared.append(os.path.basename(p))
+                except OSError:
+                    pass
+            S.log("logs cleared: %s" % (", ".join(cleared) or "无"))
+            return self._json(200, {"code": 0, "msg": "已清空",
+                                    "data": {"cleared": cleared}})
 
         if path.startswith(PROXY_PREFIX + "/") or path == PROXY_PREFIX:
             # 把 vnt2_web 的原生页面代理到本应用路径下，实现「原生应用形态」：

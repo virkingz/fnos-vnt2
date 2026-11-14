@@ -53,6 +53,7 @@ vnt_log() {
     local f
     f="$(vnt_main_log)"
     mkdir -p "$(dirname "$f")" 2>/dev/null
+    vnt_trim_log "$f"
     echo "$(date '+%Y-%m-%d %H:%M:%S') [$$] $*" >> "$f"
 }
 
@@ -60,7 +61,30 @@ vnt_ulog() {
     local f
     f="$(vnt_update_log)"
     mkdir -p "$(dirname "$f")" 2>/dev/null
+    vnt_trim_log "$f"
     echo "$(date '+%Y-%m-%d %H:%M:%S') [$$] $*" >> "$f"
+}
+
+# 日志上限：超过 VNT_LOG_MAX_BYTES 时原地截断，保留最近 VNT_LOG_KEEP_BYTES。
+# 用「原地截断」而非「改名轮转」：shell.log 由后端进程以 >> 持有 fd 追加，
+# 改名会让它继续写旧 inode，轮转失效；而 O_APPEND 下原地截断是安全的。
+VNT_LOG_MAX_BYTES="${VNT_LOG_MAX_BYTES:-524288}"    # 512 KB
+VNT_LOG_KEEP_BYTES="${VNT_LOG_KEEP_BYTES:-262144}"  # 256 KB
+
+vnt_trim_log() {
+    local f="$1" size tmp
+    [ -f "$f" ] || return 0
+    size="$(wc -c < "$f" 2>/dev/null | tr -d ' ')" || return 0
+    [ -n "$size" ] || return 0
+    [ "$size" -gt "$VNT_LOG_MAX_BYTES" ] 2>/dev/null || return 0
+    tmp="${f}.trim"
+    # 保留尾部 N 字节，再丢掉首行（可能是被截断的半行）
+    { printf '[log trimmed: 仅保留最近 %d KB]\n' "$((VNT_LOG_KEEP_BYTES / 1024))"
+      tail -c "$VNT_LOG_KEEP_BYTES" "$f" 2>/dev/null | tail -n +2; } > "$tmp" 2>/dev/null || {
+        rm -f "$tmp"; return 0; }
+    # 原地回写（保持 inode）：O_APPEND 的写入方不会因此错位
+    cat "$tmp" > "$f" 2>/dev/null
+    rm -f "$tmp"
 }
 
 # 失败：写用户可见错误并退出

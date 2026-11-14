@@ -30,7 +30,7 @@ jobs:
 
       - name: 运行测试套件
         run: |
-          for t in test_update test_rewrite test_mount test_upload test_proxy test_embed test_panel_proxy; do
+          for t in test_update test_rewrite test_mount test_upload test_proxy test_embed test_panel_proxy test_logs; do
             echo "── $t ──"
             python "scripts/$t.py"
           done

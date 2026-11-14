@@ -664,12 +664,39 @@
   }
 
   /* ---------------- 日志 ---------------- */
+  function fmtSize(n) {
+    if (!n) return '0 B';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1024 / 1024).toFixed(2) + ' MB';
+  }
+
   function loadLog() {
     var name = $('logName').value;
     req('/api/logs?name=' + name).then(function (r) {
-      $('logText').textContent = (r.code === 0 && r.data.text)
-        ? r.data.text : '（暂无日志）';
-    }).catch(function (e) { $('logText').textContent = e.message; });
+      if (r.code !== 0) throw new Error(r.msg);
+      var d = r.data || {};
+      $('logText').textContent = d.text || '（暂无日志）';
+      // 说明自动清理阈值，避免用户疑惑「日志怎么少了」
+      var size = fmtSize(d.size || 0);
+      var lim = d.limit ? ('，超过 ' + fmtSize(d.limit) + ' 自动保留最近部分')
+                        : '';
+      $('logSize').textContent = '当前大小 ' + size + lim;
+    }).catch(function (e) {
+      $('logText').textContent = e.message;
+      $('logSize').textContent = '—';
+    });
+  }
+
+  function clearLog() {
+    var name = $('logName').value;
+    if (!window.confirm('确定清空所选日志？该操作不可恢复。')) return;
+    req('/api/logs_clear', { method: 'POST', body: { name: name } })
+      .then(function (r) {
+        if (r.code !== 0) throw new Error(r.msg);
+        toast('已清空日志');
+        loadLog();
+      }).catch(function (e) { toast(e.message, true); });
   }
 
   /* ---------------- 绑定 ---------------- */
@@ -686,6 +713,7 @@
     $('btnOpenPanel').addEventListener('click', openPanel);
     $('btnUpload').addEventListener('click', uploadCore);
     $('btnLog').addEventListener('click', loadLog);
+    $('btnClearLog').addEventListener('click', clearLog);
     $('logName').addEventListener('change', loadLog);
     $('btnSaveNet').addEventListener('click', saveNet);
     $('btnTestNet').addEventListener('click', testNet);

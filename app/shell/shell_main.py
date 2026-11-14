@@ -127,6 +127,8 @@ def bootstrap_core():
 
 def main():
     S.log("=== vnt-nas shell backend starting ===")
+    # 启动即巡检一次：把上次运行遗留的过大日志压回安全范围
+    S.trim_logs()
     threading.Thread(target=S._watcher, daemon=True).start()
     threading.Thread(target=serve_unix, daemon=True).start()
     threading.Thread(target=lambda: (time.sleep(2), bootstrap_core()),
