@@ -32,8 +32,8 @@
 | 文件 | 职责 |
 |------|------|
 | `lib.sh` | 被 `cmd/*` 引用。路径、日志、架构映射、curl 封装（含代理）、令牌读写 |
-| `shell_main.py` | 进程入口。起 Unix socket（网关）与 TCP（面板端口）双监听，拉起核心 |
-| `shell_server.py` | 核心能力：端口/令牌/代理/镜像配置、`vnt2_web` 进程托管、下载与回滚 |
+| `shell_main.py` | 进程入口。起 Unix socket（网关）与 TCP（管理页端口）双监听，拉起核心 |
+| `shell_server.py` | 核心能力：端口/令牌/代理/镜像/监听范围配置、`vnt2_web` 进程托管、下载与回滚 |
 | `shell_http.py` | HTTP 层：路由、静态资源、面板自检、multipart 上传解析 |
 | `web/app.js` | 管理页交互。注意：**不得引用未声明变量**（见下方注意事项） |
 
@@ -68,7 +68,7 @@ for t in scripts/test_*.py; do python "$t"; done
 | `test_mount.py` | 挂载点识别、端口模型 |
 | `test_upload.py` | 版本号解析、zip/ELF 提取、multipart、上传安装 |
 | `test_proxy.py` | 代理读写、协议识别、本机地址绕过代理、端到端 |
-| `test_embed.py` | 内嵌面板、监听范围、令牌自动注入、前端契约 |
+| `test_embed.py` | 桌面入口、双端口模型、端口边界、令牌自动注入、前端契约 |
 
 全部测试不联网（用本地 HTTP 服务模拟），可在 CI 中直接运行。
 
@@ -85,8 +85,22 @@ for t in scripts/test_*.py; do python "$t"; done
 ### 2. 前端不得引用未声明变量
 
 曾因删掉 `var PAGE` 声明却留下赋值语句，导致 JS 抛错中断、
-iframe 的 `src` 从未被设置（面板区域一片空白）。
-`test_embed.py` 会做静态检查，使用前会先剥离字符串与注释。
+面板区域一片空白。`test_embed.py` 会做静态检查，使用前会先剥离字符串与注释。
+
+### 2b. 不做内嵌，改为跳转 + 独立图标
+
+管理页**不内嵌**组网面板。原因是双重的：vnt2_web 的前端资源编译在 ELF 内、
+只能根路径访问（见第 1 条），而且管理页经网关访问时是 HTTPS，
+内嵌 HTTP 面板会被浏览器按混合内容策略拦截（表现为空白）。
+
+因此桌面提供两个独立图标：
+- `vnt-nas.main`：`type: iframe`，走统一网关，打开管理页
+- `vnt-nas.panel`：`type: url` + `port: ${wizard_panel_port}`，
+  用浏览器新标签直接打开 vnt2_web，不受 iframe 与混合内容限制
+
+`${字段名}` 可引用**任意**向导字段（不只是 `wizard_port`）。
+真实仓库佐证：`fn-rtl8125`、`FN_WOL`、`Fndesk` 等均使用此形式，
+其中 `Fndesk` 引用的就是自定义字段 `wizard_app_music`。
 
 ### 3. 访问本机地址必须绕过代理
 
@@ -96,7 +110,7 @@ iframe 的 `src` 从未被设置（面板区域一片空白）。
 ### 4. 令牌可由 URL 传入
 
 vnt2_web 支持 `/?token=xxx`，前端会读取、存入 `localStorage` 并自动登录，
-随后把地址栏的令牌抹掉。因此内嵌与跳转都用带令牌的地址；
+随后把地址栏的令牌抹掉。因此跳转打开用带令牌的地址；
 界面上只展示不含令牌的版本。
 
 ### 5. Python 的 urllib 不支持 SOCKS
