@@ -69,6 +69,7 @@ for t in scripts/test_*.py; do python "$t"; done
 | `test_upload.py` | 版本号解析、zip/ELF 提取、multipart、上传安装 |
 | `test_proxy.py` | 代理读写、协议识别、本机地址绕过代理、端到端 |
 | `test_embed.py` | 桌面入口、双端口模型、端口边界、令牌自动注入、前端契约 |
+| `test_panel_proxy.py` | 面板反代：base/令牌/API 钩子注入、HTML 资源改写、网关挂载点、上游不可用错误页 |
 
 全部测试不联网（用本地 HTTP 服务模拟），可在 CI 中直接运行。
 
@@ -76,44 +77,74 @@ for t in scripts/test_*.py; do python "$t"; done
 
 这些是踩过的坑，改代码时请留意：
 
-### 1. vnt2_web 不能做子路径反向代理
+### 1. 不要改磁盘上的二进制
 
-它的前端资源用 **RustEmbed 编译在 ELF 二进制内部**，JS 里的 `/api/...`
-是拼接用的常量片段。若挂在子路径下改写响应，会连**机器码一起改坏**
-（实测命中 232 处 ELF 数据）。因此面板必须用它**自己的端口**访问。
+vnt2_web 的前端资源用 **RustEmbed 编译在 ELF 二进制内部**，
+其中的 `/api/...` 在字符串常量池里**首尾相连、没有引号**。
+因此**绝不能对磁盘上的二进制做字符串替换**——会连机器码一起改坏。
+
+> 注意区分：这只约束「改二进制」。**HTTP 响应里的文本可以安全改写**，
+> 因为那已是解压后的纯 HTML/JS，与 ELF 无关。当前实现只改写 HTML 中的
+> `/assets/...`（JS 改由 API 钩子接管，见 2b）。
 
 ### 2. 前端不得引用未声明变量
 
 曾因删掉 `var PAGE` 声明却留下赋值语句，导致 JS 抛错中断、
 面板区域一片空白。`test_embed.py` 会做静态检查，使用前会先剥离字符串与注释。
 
-### 2b. 不做内嵌，改为跳转 + 独立图标
+### 2b. 内嵌组网面板：必须注入 `<base>` + API 钩子
 
-管理页**不内嵌**组网面板。原因是双重的：vnt2_web 的前端资源编译在 ELF 内、
-只能根路径访问（见第 1 条），而且管理页经网关访问时是 HTTPS，
-内嵌 HTTP 面板会被浏览器按混合内容策略拦截（表现为空白）。
+组网面板内嵌在管理页的 `/core/` 子路径下。踩过的坑按重要性排列：
 
-因此桌面提供两个独立图标：
-- `vnt-nas.main`：`type: iframe`，走统一网关，打开管理页
-- `vnt-nas.panel`：`type: url` + `port: ${wizard_panel_port}`，
-  用浏览器新标签直接打开 vnt2_web，不受 iframe 与混合内容限制
+**① `<base>` 是必需的（否则必然白屏）**
 
-`${字段名}` 可引用**任意**向导字段（不只是 `wizard_port`）。
-真实仓库佐证：`fn-rtl8125`、`FN_WOL`、`Fndesk` 等均使用此形式，
-其中 `Fndesk` 引用的就是自定义字段 `wizard_app_music`。
+vnt2_web 用 Vue Router 的 `createWebHistory()`，它在未显式传 base 时
+会读取 `<base href>`：
+
+```js
+function normalizeBase(base){
+  if(!base){ const el=document.querySelector('base')
+             base=(el&&el.getAttribute('href'))||'/' } ... }
+```
+
+不注入时 base 取 `/`，而实际路径是 `/app/vnt-nas/core/`，
+路由表里没有这一条 → 渲染空白。直连（路径恰为 `/`）则正常。
+**症状特征：资源全部 200、直连能开、代理白屏。**
+
+**② 绝不能设 `globalThis.__VNT_DESKTOP__`**
+
+该标志为真时前端会把令牌置空（`At ? "" : ...`），它只适用于
+「宿主代发全部 API」的场景。我们并未接管 API 时设它，
+会导致所有请求 401 → 前端登出 → 白屏。
+
+**③ 用官方 API 钩子代替改写 JS**
+
+前端所有请求都经 `De()` 发出，它开头即判断：
+
+```js
+if (globalThis.__VNT_API_REQUEST__) {
+  const l = await globalThis.__VNT_API_REQUEST__({method, path, body})
+  if (l.code !== 0) throw ...; return l.data }
+```
+
+定义该钩子后，前端不再自己 fetch，由宿主拼出 `<挂载点>/core + path`
+并附令牌。**因此 JS 无需任何改写**——minify 后的代码做字符串替换
+风险高且易遗漏。现在只改写 HTML 里的 `/assets/...`。
+
+**④ 令牌按「源」隔离**
+
+令牌存 localStorage，直连端口与经代理内嵌是**不同的源**，
+所以必须注入脚本把令牌写进当前源的 localStorage。
 
 ### 3. 访问本机地址必须绕过代理
 
 配置了 HTTP/SOCKS 代理后，访问 `127.0.0.1:<核心端口>` 若也走代理，
 会出现 `Empty reply from server`。所有出网函数都需经 `is_local_url()` 判断。
 
-### 4. 令牌可由 URL 传入
+⚠ 新增出网函数时容易漏掉这点：`http_raw()`（面板反代用）曾因此
+连 `127.0.0.1` 都失败，修法是显式 `ProxyHandler({})` 禁用环境代理。
 
-vnt2_web 支持 `/?token=xxx`，前端会读取、存入 `localStorage` 并自动登录，
-随后把地址栏的令牌抹掉。因此跳转打开用带令牌的地址；
-界面上只展示不含令牌的版本。
-
-### 5. Python 的 urllib 不支持 SOCKS
+### 4. Python 的 urllib 不支持 SOCKS
 
 配置代理后所有出网请求统一走 `curl`（原生支持 socks5/socks5h）。
 未配置代理时仍用 urllib，不额外产生进程。
