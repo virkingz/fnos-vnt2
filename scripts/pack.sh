@@ -31,6 +31,25 @@ mkdir -p build/.appstage
 cp -rf app/shell app/ui build/.appstage/
 cp -rf config build/.appstage/config
 find build/.appstage -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+
+# 统一换行为 LF。Windows 上编辑会把 .py/.sh 写成 CRLF，
+# 打进包后在 Linux 上虽多数能跑，但不规范且可能触发解释器报错。
+python - <<'PYEOF'
+import os
+for root, _dirs, files in os.walk('build/.appstage'):
+    for name in files:
+        p = os.path.join(root, name)
+        # 只处理文本类文件，跳过图片等二进制
+        if os.path.splitext(name)[1].lower() in ('.png', '.jpg', '.jpeg', '.gif', '.ico'):
+            continue
+        try:
+            raw = open(p, 'rb').read()
+        except OSError:
+            continue
+        if b'\r\n' in raw:
+            open(p, 'wb').write(raw.replace(b'\r\n', b'\n'))
+PYEOF
+
 chmod 755 build/.appstage/shell/lib.sh
 tar -czf "$STAGE/app.tgz" -C build/.appstage shell ui config
 
