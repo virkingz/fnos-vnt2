@@ -48,25 +48,18 @@ def _rm(path):
 
 
 def panel_url_for(handler, with_token=True):
-    """构造组网面板地址（vnt2_web 自己的端口）。
+    """构造组网面板地址（同源子路径，实现原生应用形态）。
 
-    面板由 vnt2_web 独立占用 VNT_WEB_PORT 对外提供，页面必须用它自己的
-    端口访问：前端资源与 API 都是根路径，无法挂在子路径下。
+    经本应用反代到 /core/，因此：
+      - 与管理页同源，可安全 iframe 内嵌（不受混合内容限制）
+      - 地址栏是飞牛的 :5666/app/vnt-nas，看起来就是原生应用的一部分
+      - 令牌由代理注入 Authorization，页面内无需手工粘贴
 
-    vnt2_web 原生支持 /?token=xxx：前端会读取该参数、写入 localStorage
-    并自动进入控制台，随后把地址栏里的 token 抹掉。
-    因此这里直接带上令牌，用户无需再手工粘贴。
+    vnt2_web 原生的 /?token=xxx 仍作为兜底保留：若反代链路异常，
+    可改用带令牌的直连地址。
     """
-    host = (handler.headers.get("Host") or "").split(":")[0].strip()
-    if not host or host in ("localhost", "127.0.0.1", "::1"):
-        ip = handler._lan_ip() if hasattr(handler, "_lan_ip") else ""
-        host = ip or "127.0.0.1"
-    url = "http://%s:%d/" % (host, S.PORTS["VNT_WEB_PORT"])
-    if with_token:
-        tok = S.get_token()
-        if tok:
-            from urllib.parse import quote
-            url += "?token=" + quote(tok, safe="")
+    mount = handler._mount(getattr(handler, "path", "") or "/")
+    url = "%s%s/" % (mount, PROXY_PREFIX)
     return url
 
 
@@ -166,7 +159,13 @@ def restart_self():
         S.log("restart failed: %s" % e)
 
 
-_ABS_PATH_RE = re.compile(r'(["\'`])/(?![/*])')
+# 匹配「引号 + 单斜杠 + 字母开头的路径」。
+# 必须限定斜杠后是字母，否则会把下面这些一起误改：
+#   SVG 自闭合标签  stroke='round'/%3E   → 斜杠后是 '%' 或 '>'
+#   协议相对地址    "//host/x"            → 斜杠后是 '/'
+#   代码注释        "/* ... */"           → 斜杠后是 '*'
+# 真实资源路径（/assets/、/api/ 等）斜杠后都是字母，因此能精确命中。
+_ABS_PATH_RE = re.compile(r'(["\'`])/(?=[A-Za-z])')
 
 
 def rewrite_paths(text, prefix=PROXY_PREFIX):
@@ -500,18 +499,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, dict(self._diag(raw_path)))
 
         if path == "/api/panel":
-            # 面板地址 = vnt2_web 自己的端口（它独立对外提供组网面板）。
-            #
-            # vnt2_web 原生支持 /?token=xxx：前端会读取该参数、写入
-            # localStorage 并自动进入控制台。因此返回带令牌的地址，
-            # 跳转打开无需再手工粘贴令牌；
-            # 另给出不含令牌的地址用于界面展示，避免令牌显示在页面上。
+            # 面板地址 = 本应用的同源子路径 /core/（由 _proxy_panel 反代）。
+            # 同源带来两个好处：
+            #   1. 可直接 iframe 内嵌，不受浏览器混合内容策略限制
+            #   2. 地址栏保持飞牛的 :5666/app/vnt-nas，形如原生应用
+            # 令牌由反代注入 Authorization，页面内无需手工粘贴。
             return self._json(200, {"code": 0, "msg": "success",
                                     "data": {
                                         "port": S.PORTS["VNT_WEB_PORT"],
                                         "url": panel_url_for(self),
                                         "display_url": panel_url_bare(self),
-                                        "panel_path": "/",
+                                        "panel_path": PROXY_PREFIX + "/",
                                         "has_token": bool(S.get_token()),
                                         "core_running": S.core_running(),
                                         "bind": S.read_bind(),
@@ -538,14 +536,101 @@ class Handler(BaseHTTPRequestHandler):
                                              "text": S.tail(files[name], 300)}})
 
         if path.startswith(PROXY_PREFIX + "/") or path == PROXY_PREFIX:
-            # 已废弃的代理入口：vnt2_web 的前端资源编译在 ELF 内、
-            # JS 用绝对路径与拼接片段，做内容改写会把程序改坏，
-            # 因此这里直接 302 到它的真实地址，避免出现白屏。
-            target = panel_url_for(self)
-            return self._send(302, b"", "text/plain",
-                              {"Location": target})
+            # 把 vnt2_web 的原生页面代理到本应用路径下，实现「原生应用形态」：
+            # 经飞牛统一网关访问时是同源的 HTTPS，可直接 iframe 内嵌，
+            # 不存在混合内容拦截问题，地址栏也是飞牛的 :5666。
+            return self._proxy_panel(raw_path, path)
 
         return self._static(path, raw_path)
+
+    # --- vnt2_web 反向代理 -------------------------------------------------
+    def _proxy_panel(self, raw_path, path):
+        """把 /core/** 的请求转发给 vnt2_web，并改写响应中的绝对路径。
+
+        与「改磁盘上的二进制」不同：这里拿到的是 HTTP 响应里的纯文本
+        （HTML / JS / CSS），不存在 ELF 机器码问题，可安全改写。
+
+        三条改写规则（见 rewrite_paths）：
+          HTML: href="/assets/x.css"  src='/assets/x.js'
+          JS:   "/api/version"  fetch("/api/instances")
+        改写为带本应用挂载点的前缀，浏览器才会从本应用取资源。
+
+        另注入 Authorization，使内嵌后无需手工粘贴令牌。
+        """
+        mount = self._mount(raw_path)      # 直连为 ""，网关为 /app/vnt-nas
+        prefix = mount + PROXY_PREFIX      # 如 /app/vnt-nas/core
+
+        # 去掉挂载点与 /core，还原成 vnt2_web 认识的路径
+        rest = path[len(PROXY_PREFIX):] or "/"
+        if not rest.startswith("/"):
+            rest = "/" + rest
+        qs = ""
+        if "?" in self.path:
+            qs = "?" + self.path.split("?", 1)[1]
+        target_path = rest + qs
+
+        upstream = "http://127.0.0.1:%d%s" % (S.PORTS["VNT_WEB_PORT"],
+                                              target_path)
+        headers = {"Authorization": "Bearer %s" % S.get_token()}
+        # 透传少数对渲染有影响的头
+        for k in ("Accept", "Accept-Language", "Range", "User-Agent"):
+            v = self.headers.get(k)
+            if v:
+                headers[k] = v
+
+        body = None
+        clen = self.headers.get("Content-Length")
+        if clen and clen.isdigit() and int(clen) > 0:
+            body = self.rfile.read(int(clen))
+            headers["Content-Type"] = (self.headers.get("Content-Type")
+                                       or "application/octet-stream")
+
+        try:
+            code, data, hdrs = S.http_raw(upstream, method=self.command,
+                                          headers=headers, body=body,
+                                          timeout=30)
+        except Exception as e:  # noqa: BLE001
+            return self._error_page(
+                502, "无法连接组网面板核心",
+                "原因：%s<br>请确认核心已下载并已启动。" % e)
+
+        ctype = ""
+        for k, v in (hdrs or {}).items():
+            if k.lower() == "content-type":
+                ctype = v
+                break
+
+        # 只改写文本类内容；图片等二进制原样透传
+        if data and ("text/html" in ctype or "javascript" in ctype
+                     or "text/css" in ctype or "application/json" in ctype):
+            try:
+                data = rewrite_paths(data.decode("utf-8"), prefix).encode("utf-8")
+            except UnicodeDecodeError:
+                pass
+
+        # 转发必要的响应头
+        out = {"Cache-Control": "no-store"}
+        for k, v in (hdrs or {}).items():
+            if k.lower() in ("content-type", "content-length"):
+                continue
+            if k.lower() in ("connection", "transfer-encoding", "keep-alive"):
+                continue
+            out[k] = v
+        return self._send(code, data, ctype or "application/octet-stream", out)
+
+    def _error_page(self, code, title, detail):
+        """代理失败时的可读错误页，避免浏览器只显示白屏。"""
+        import html as _h
+        body = (
+            "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+            "<title>%s</title></head><body style=\"font-family:system-ui,"
+            "-apple-system,'Segoe UI',sans-serif;max-width:600px;margin:14vh auto;"
+            "padding:0 20px;color:#2c2c2a\">"
+            "<h1 style=\"font-size:18px;font-weight:500;margin:0 0 12px\">%s</h1>"
+            "<p style=\"font-size:14px;line-height:1.7;color:#5f5e5a\">%s</p>"
+            "</body></html>" % (_h.escape(title), _h.escape(title), detail))
+        return self._send(code, body, "text/html; charset=utf-8",
+                          {"Cache-Control": "no-store"})
 
     # --- 代理连通性测试 --------------------------------------------------
     def _test_proxy(self):

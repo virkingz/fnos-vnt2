@@ -177,18 +177,25 @@
     <div class="card">
       <h2>组网面板</h2>
       <p class="hint">组网的添加、启动、查看节点与路由，全部在 vnt2_web 自带页面完成。
-        该页面由 vnt2_web 以自己的端口独立提供服务，桌面上的「VNT 组网面板」图标
-        打开的是同一个页面。</p>
+        下面是它的原生界面，已由本应用代理，与飞牛桌面同源，
+        因此可直接内嵌、且无需手工登录。</p>
       <dl class="kv">
         <div><dt>面板地址</dt><dd class="mono" id="panelUrl">—</dd></div>
         <div><dt>状态</dt><dd id="panelReady">—</dd></div>
       </dl>
       <div class="row">
-        <button class="btn primary" id="btnOpenPanel">打开组网面板</button>
+        <button class="btn primary" id="btnOpenPanel">在新窗口打开</button>
+        <button class="btn" id="btnReloadFrame">重新加载</button>
         <button class="btn" id="btnCopyPanel">复制面板地址</button>
         <button class="btn" id="btnStartCore2">启动核心</button>
       </div>
-      <p class="hint">打开时会自动带上访问令牌，无需手工粘贴登录。</p>
+    </div>
+    <div class="card">
+      <div id="frameTip" class="frametip" hidden></div>
+      <div class="frame-wrap">
+        <iframe id="coreFrame" src="about:blank" title="vnt2_web 组网面板"
+                referrerpolicy="no-referrer"></iframe>
+      </div>
     </div>
     <div class="card">
       <h2>面板自检</h2>

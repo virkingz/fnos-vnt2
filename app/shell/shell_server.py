@@ -407,6 +407,41 @@ def http_get(url, timeout=20, headers=None):
         return resp.status, resp.read()
 
 
+def http_raw(url, method="GET", headers=None, body=None, timeout=30):
+    """向本机上游发起请求，返回 (status, body, headers)。
+
+    专门用于「面板反向代理」：目标是 127.0.0.1 上的 vnt2_web，
+    因此**不走代理**（本机地址始终直连，见 is_local_url），
+    也不需要 curl，用标准库即可。支持任意方法与请求体。
+
+    返回 (status_code, bytes, {header: value})。
+    """
+    hdrs = {"User-Agent": UA}
+    if headers:
+        hdrs.update(headers)
+
+    # 重定向不自动跟随：前端资源由代理逐一手动处理，跟随会打乱路径
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, hdrs2, newurl):
+            return None
+
+    # 必须显式禁用代理：目标是回环地址，而 urllib 默认会读取 http_proxy
+    # 等环境变量，把本机请求也塞进代理隧道（曾导致连 127.0.0.1 失败）。
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), _NoRedirect)
+    req = urllib.request.Request(url, data=body, headers=hdrs, method=method)
+    try:
+        resp = opener.open(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        # 4xx/5xx 是上游的有效响应，原样透传给浏览器
+        return e.code, e.read(), dict(e.headers.items())
+    except urllib.error.URLError as e:
+        # 连不上上游：向上抛，由调用方转成可读错误页
+        raise RuntimeError(str(getattr(e, "reason", e)))
+    with resp:
+        return resp.status, resp.read(), dict(resp.headers.items())
+
+
 def _urlopen(url, timeout=60, headers=None):
     """打开 URL 用于流式下载。
 
@@ -741,14 +776,14 @@ def start_core():
             return False, "核心无法运行：%s" % info
 
         token = get_token()
-        # vnt2_web 以自己的端口对外提供组网面板（桌面第二个图标直连它），
-        # 因此监听地址可配置：默认全部网卡，也可收紧为本机回环。
-        host = read_bind()
+        # vnt2_web 固定只监听 127.0.0.1，不直接对外暴露：
+        # 对外统一由本应用反代到 /core/（同源），因此面板可被 iframe 内嵌，
+        # 也不会额外暴露端口、无须给它单独做访问控制。
         env = dict(os.environ)
         env["VNT_WEB_TOKEN"] = token
         args = [
             CORE_BIN,
-            "--addr", "%s:%d" % (host, PORTS["VNT_WEB_PORT"]),
+            "--addr", "127.0.0.1:%d" % PORTS["VNT_WEB_PORT"],
             "--token", token,
         ]
         try:

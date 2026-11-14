@@ -136,30 +136,36 @@ def test_ui_ids():
         check("存在 #%s" % eid, eid in defined)
 
 
-def test_no_iframe():
-    print("4) 不再内嵌：管理页只提供跳转入口")
+def test_embed_restored():
+    print("4) 恢复内嵌：面板经 /core/ 同源代理")
     js = open(os.path.join(ROOT, "app", "shell", "web", "app.js"),
               encoding="utf-8").read()
     html = open(os.path.join(ROOT, "app", "shell", "web", "index.html"),
                 encoding="utf-8").read()
-
-    check("前端无 iframe 引用", "coreFrame" not in js)
-    check("页面无 iframe 标签", "<iframe" not in html)
-    check("跳转用带令牌的 url", "window.open(d.url" in js)
-    check("界面展示用 display_url", "d.display_url || d.url" in js)
-    check("已移除混合内容检测（不再内嵌，无需处理）",
-          "checkMixedContent" not in js)
-
     src = open(os.path.join(ROOT, "app", "shell", "shell_http.py"),
                encoding="utf-8").read()
-    check("面板接口使用 vnt2_web 自己的端口",
-          'S.PORTS["VNT_WEB_PORT"]' in src)
-    check("已移除内容改写式代理",
-          "def _proxy_panel" not in src)
+
+    check("前端有 iframe 引用", "coreFrame" in js)
+    check("页面有 iframe 标签", "<iframe" in html)
+    check("内嵌用后端返回的 url", "f.src = d.url" in js)
+    check("空内容有提示（不静默白屏）", "watchFrame" in js and "frameTip" in html)
+    check("跳转仍可用（同源新窗口）", "window.open(d.url" in js)
+    check("界面展示用 display_url", "d.display_url || d.url" in js)
+
+    check("后端实现反向代理", "def _proxy_panel" in src)
+    check("代理使用 http_raw", "S.http_raw" in src)
+    check("代理失败给可读错误页", "def _error_page" in src)
+    check("沿用 rewrite_paths 改写", "rewrite_paths(" in src)
+    check("代理注入令牌",
+          'Bearer %s" % S.get_token()' in src)
+
+    # 改写正则必须限制斜杠后为字母，否则会误改 SVG 自闭合标签
+    check("改写正则限定字母开头",
+          "(?=[A-Za-z])" in src, "需防止 SVG 的 /> 被误改")
 
 
 def test_desktop_entries():
-    print("5) 桌面两个图标：管理页 iframe + 面板直连 url")
+    print("5) 桌面两个图标：管理页 + 面板入口")
     import json
     cfg = json.load(open(os.path.join(ROOT, "app", "ui", "config"),
                          encoding="utf-8"))
@@ -174,14 +180,12 @@ def test_desktop_entries():
     check("管理页走统一网关", main.get("gatewayPrefix") == "/app/vnt-nas",
           main.get("gatewayPrefix"))
 
-    # 面板图标必须直连 vnt2_web 端口，不能用 iframe（会被混合内容拦）
-    check("面板入口为 url（外部打开）", panel.get("type") == "url",
+    # 面板图标：type=url（浏览器新窗口），端口用向导占位符
+    # 真实仓库佐证：fn-rtl8125 / FN_WOL / Fndesk 均用 ${自定义字段名}
+    check("面板入口为 url", panel.get("type") == "url",
           panel.get("type"))
-    # 端口用向导占位符，这样用户改端口后图标依然有效
-    # （真实仓库佐证：fn-rtl8125 / FN_WOL / Fndesk 等均用 ${字段名} 形式）
     check("面板入口端口引用向导字段",
           panel.get("port") == "${wizard_panel_port}", panel.get("port"))
-    check("面板入口不带网关前缀", "gatewayPrefix" not in panel)
     check("两入口标题不同", main.get("title") != panel.get("title"))
 
     # 向导必须提供该字段，否则占位符解析不出来
@@ -203,11 +207,18 @@ def test_panel_url():
     import shell_http as H
 
     class Fake(H.Handler):
-        def __init__(self, host):
+        def __init__(self, host, path="/api/panel"):
             self._h = host
+            self.path = path
 
         def _lan_ip(self):
             return "10.0.0.5"
+
+        def _mount(self, raw_path):
+            pre = S.GATEWAY_PREFIX
+            if raw_path == pre or raw_path.startswith(pre + "/"):
+                return pre
+            return ""
 
         @property
         def headers(self):
@@ -216,54 +227,45 @@ def test_panel_url():
     S.PORTS["VNT_WEB_PORT"] = 19199
     S.set_token("MyTestToken1234567890")
 
-    # 带令牌版本：vnt2_web 会自动登录
-    got = H.panel_url_for(Fake("192.168.3.251"))
-    check("带令牌地址", got ==
-          "http://192.168.3.251:19199/?token=MyTestToken1234567890", got)
+    # 直连时：面板挂在 /core/
+    got = H.panel_url_for(Fake("192.168.3.251", "/api/panel"))
+    check("直连时给出 /core/", got == "/core/", got)
 
-    # 展示版本：不含令牌，避免界面泄露
-    got = H.panel_url_bare(Fake("192.168.3.251"))
-    check("展示地址不含令牌",
-          got == "http://192.168.3.251:19199/", got)
-    check("展示地址无 token 字样", "token" not in got, got)
+    # 经网关时：带上挂载点，保证同源且路径正确
+    got = H.panel_url_for(Fake("nas.lan:5666", "/app/vnt-nas/api/panel"))
+    check("网关时给出 /app/vnt-nas/core/",
+          got == "/app/vnt-nas/core/", got)
 
-    check("回环时回落局域网地址",
-          H.panel_url_bare(Fake("127.0.0.1")) == "http://10.0.0.5:19199/")
-
-    # 令牌含特殊字符时应正确编码
-    S.set_token("aBc!@#$%^&*()_+=-{}[]")
-    got = H.panel_url_for(Fake("nas.lan"))
-    check("特殊字符令牌被 URL 编码",
-          "token=" in got and " " not in got and "#" not in got.split("token=")[1],
-          got)
+    # 展示地址与访问地址一致（令牌由代理注入，不再拼进 URL）
+    bare = H.panel_url_bare(Fake("192.168.3.251", "/api/panel"))
+    check("展示地址同为 /core/", bare == "/core/", bare)
+    check("地址里不含令牌（代理注入）", "token" not in bare, bare)
 
 
 def test_architecture():
-    """架构约束：vnt2_web 以自己端口对外提供面板，不再有代理层。"""
-    print("7) 架构约束（无代理层，面板由核心自己提供）")
+    """架构约束：核心固定回环，面板由本应用反代到 /core/。"""
+    print("7) 架构约束（核心回环 + 同源反代）")
     srv = open(os.path.join(ROOT, "app", "shell", "shell_server.py"),
                encoding="utf-8").read()
-    check("核心监听地址可配置（bind）",
-          '"--addr", "%s:%d" % (host' in srv)
+    check("核心固定绑定 127.0.0.1",
+          '"--addr", "127.0.0.1:%d"' in srv)
+    check("核心不再用可配置 bind",
+          '"--addr", "%s:%d" % (host' not in srv)
+    check("bind 用于面板代理监听范围",
+          "面板代理的监听范围" in srv or "面板代理" in srv)
+    check("存在 http_raw（代理用）", "def http_raw" in srv)
+    check("http_raw 显式禁用代理（本机直连）",
+          "ProxyHandler({})" in srv)
+
+    h = open(os.path.join(ROOT, "app", "shell", "shell_http.py"),
+             encoding="utf-8").read()
+    check("PROXY_PREFIX 指向 /core", 'PROXY_PREFIX = "/core"' in h)
+    check("实现 _proxy_panel", "def _proxy_panel" in h)
 
     main = open(os.path.join(ROOT, "app", "shell", "shell_main.py"),
                 encoding="utf-8").read()
-    check("不再启动面板代理", "serve_proxy" not in main)
-    check("不再写入 PROXY_PORT", "PROXY_PORT" not in main)
-    check("端口文件仍记录两个端口",
+    check("端口文件记录两个端口",
           "PANEL_PORT=%d\\nVNT_WEB_PORT=%d" in main)
-
-    # 代理模块应已彻底移除
-    check("代理模块已删除",
-          not os.path.isfile(os.path.join(ROOT, "app", "shell", "shell_tls.py")))
-    h = open(os.path.join(ROOT, "app", "shell", "shell_http.py"),
-             encoding="utf-8").read()
-    check("shell_http 无 PROXY_PORT 引用", "PROXY_PORT" not in h)
-    check("shell_http 无 panel_scheme", "panel_scheme" not in h)
-
-    ls = open(os.path.join(ROOT, "app", "shell", "lib.sh"),
-              encoding="utf-8").read()
-    check("lib.sh 无 PROXY_PORT", "PROXY_PORT" not in ls)
 
 
 def test_token_url_support():
@@ -328,7 +330,7 @@ def main():
     test_no_undeclared()
     test_bind()
     test_ui_ids()
-    test_no_iframe()
+    test_embed_restored()
     test_desktop_entries()
     test_panel_url()
     test_architecture()

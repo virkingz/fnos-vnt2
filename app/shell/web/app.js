@@ -447,12 +447,19 @@
     req('/api/panel').then(function (r) {
       if (r.code !== 0) throw new Error(r.msg);
       var d = r.data;
-      // 展示用不含令牌的地址，避免令牌出现在界面上
       $('panelUrl').textContent = d.display_url || d.url;
       $('panelReady').textContent = !d.has_token
         ? '尚未设置访问令牌，请先到「访问设置」设置'
-        : (d.core_running ? '核心运行中，可打开面板（自动登录）'
+        : (d.core_running ? '核心运行中，已内嵌显示（代理已注入令牌）'
                           : '核心未运行，请先启动核心');
+
+      // 内嵌：面板经本应用 /core/ 反代，同源、无需令牌
+      var f = $('coreFrame');
+      if (f && d.core_running && d.has_token && d.url) {
+        if (f.getAttribute('src') !== d.url) f.src = d.url;
+      } else if (f) {
+        f.src = 'about:blank';
+      }
     }).catch(function (e) {
       $('panelUrl').textContent = e.message;
       $('panelReady').textContent = '—';
@@ -471,10 +478,44 @@
         toast('核心未运行，请先启动核心', true);
         return;
       }
-      // 带令牌打开，vnt2_web 会自动登录
+      // 同源路径，新窗口打开即为飞牛地址下的面板
       window.open(d.url, '_blank');
-      toast('已打开组网面板（已自动带上令牌）');
+      toast('已在新窗口打开组网面板');
     }).catch(function (e) { toast(e.message, true); });
+  }
+
+  function reloadFrame() {
+    var f = $('coreFrame');
+    if (f) {
+      var src = f.getAttribute('src');
+      f.src = 'about:blank';
+      setTimeout(function () { f.src = src; }, 60);
+    }
+    loadPanelInfo();
+    toast('已重新加载内嵌面板');
+  }
+
+  // 内嵌加载后若内容为空，给出提示，避免静默白屏
+  function watchFrame() {
+    var f = $('coreFrame');
+    var tip = $('frameTip');
+    if (!f) return;
+    f.addEventListener('load', function () {
+      // 同源才能读 contentDocument；本代理是同源的，正常可读
+      var doc = null;
+      try { doc = f.contentDocument; } catch (e) { doc = null; }
+      if (!doc || !tip) return;
+      var txt = (doc.body && doc.body.innerText)
+        ? doc.body.innerText.trim() : '';
+      var hasNode = doc.querySelector('div,table,form,section,main');
+      if (!doc.body || (!txt && !hasNode)) {
+        tip.hidden = false;
+        tip.textContent = '面板已加载但内容为空。请点「自检面板可用性」查看原因，'
+          + '或先确认核心已下载并启动。';
+      } else {
+        tip.hidden = true;
+      }
+    });
   }
 
   function copyPanelUrl() {
@@ -549,11 +590,13 @@
     $('btnSaveBind').addEventListener('click', saveBind);
     $('btnDiag').addEventListener('click', runDiag);
     $('btnCopyPanel').addEventListener('click', copyPanelUrl);
+    $('btnReloadFrame').addEventListener('click', reloadFrame);
   }
 
   function boot() {
     initTabs();
     bind();
+    watchFrame();
     refresh();
     loadPanelInfo();
     loadInstances();
