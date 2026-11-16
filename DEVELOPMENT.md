@@ -6,6 +6,17 @@
 - Bash
 - 打包用 `bash scripts/pack.sh`，**不依赖任何外部工具**
 
+## 推送代码
+
+仓库已配置为通过 **SSH** 推送（`origin` = `git@github.com:virkingz/fnos-vnt2.git`）。
+原 HTTPS 地址保留为 `old-origin`。
+
+换新机器时的密钥生成、GitHub 添加与故障排查见 **[GIT-SSH.md](GIT-SSH.md)**。
+
+```bash
+git push origin main
+```
+
 ## 目录结构
 
 ```
