@@ -68,21 +68,37 @@ def serve_unix():
         S.log("unix server stopped: %s" % e)
 
 
-def serve_tcp():
-    """在用户配置的面板端口上提供服务。
+def panel_bind_host():
+    """管理页 TCP 的绑定地址。
 
-    管理页与组网面板都经由本服务转发，因此用户只需关心这一个端口。
-    vnt2_web 只在内部回环端口运行，不直接暴露。
+    默认 127.0.0.1（仅本机）——飞牛桌面入口走 Unix socket，不依赖该端口对外，
+    因此默认不对外暴露，减少攻击面。
+
+    Docker 部署需要从容器外访问管理页，此时由 entrypoint 置
+    PANEL_BIND=0.0.0.0（容器内的绑定范围与端口映射是两回事）。
+    """
+    v = (os.environ.get("PANEL_BIND") or "").strip()
+    if v in ("0.0.0.0", "127.0.0.1", "::", "::1"):
+        return v
+    return "127.0.0.1"
+
+
+def serve_tcp():
+    """在配置的面板端口上提供服务。
+
+    管理页与组网面板都经由本服务转发（面板经 /core/ 反代），
+    因此用户只需关心这一个端口。vnt2_web 只在内部回环端口运行。
     """
     port = S.PORTS["PANEL_PORT"]
+    host = panel_bind_host()
     try:
-        srv = ThreadingHTTPServer(("0.0.0.0", port), H.Handler)
+        srv = ThreadingHTTPServer((host, port), H.Handler)
     except OSError as e:
-        S.log("panel port %d unavailable: %s" % (port, e))
+        S.log("panel port %d unavailable on %s: %s" % (port, host, e))
         # 端口被占：尝试就近另选一个，避免应用完全起不来
         for alt in range(port + 1, port + 11):
             try:
-                srv = ThreadingHTTPServer(("0.0.0.0", alt), H.Handler)
+                srv = ThreadingHTTPServer((host, alt), H.Handler)
                 S.PORTS["PANEL_PORT"] = alt
                 S.log("panel port fallback to %d" % alt)
                 break
@@ -92,7 +108,9 @@ def serve_tcp():
             S.log("no usable panel port, service not started")
             return
 
-    S.log("panel listening: 0.0.0.0:%d" % S.PORTS["PANEL_PORT"])
+    S.log("panel listening: %s:%d" % (host, S.PORTS["PANEL_PORT"]))
+    if host in ("0.0.0.0", "::"):
+        S.log("提示: 管理页对局域网开放；如需仅本机访问，设 PANEL_BIND=127.0.0.1")
     try:
         with open(S.PORT_FILE, "w", encoding="utf-8") as f:
             f.write("PANEL_PORT=%d\nVNT_WEB_PORT=%d\n"

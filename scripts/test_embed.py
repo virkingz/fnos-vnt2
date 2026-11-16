@@ -336,6 +336,7 @@ def test_token_url_support():
 
 def test_ports():
     print("10) 两个端口的读写与冲突处理")
+    import json
     # 默认值
     check("管理页端口默认 19099", S.PANEL_PORT_DEFAULT == 19099,
           S.PANEL_PORT_DEFAULT)
@@ -367,6 +368,34 @@ def test_ports():
               encoding="utf-8").read()
     check("配置脚本支持面板端口", "wizard_panel_port" in cf)
     check("配置脚本检测端口冲突", "两端口冲突" in cf)
+
+    # 管理页 TCP 默认只监听本机回环。
+    # 飞牛桌面入口走 Unix socket（app/ui/config 的 gatewaySocket），
+    # 不依赖该端口对外；默认不暴露可减少攻击面。
+    # Docker 由 entrypoint 置 PANEL_BIND=0.0.0.0（否则端口映射失效）。
+    import shell_main as M
+    _old = os.environ.pop("PANEL_BIND", None)
+    try:
+        check("管理页默认仅监听本机", M.panel_bind_host() == "127.0.0.1",
+              M.panel_bind_host())
+        os.environ["PANEL_BIND"] = "0.0.0.0"
+        check("可用 PANEL_BIND 放开监听", M.panel_bind_host() == "0.0.0.0")
+        os.environ["PANEL_BIND"] = "1.2.3.4"
+        check("非法绑定值回落到回环", M.panel_bind_host() == "127.0.0.1")
+    finally:
+        os.environ.pop("PANEL_BIND", None)
+        if _old is not None:
+            os.environ["PANEL_BIND"] = _old
+
+    # 桌面入口必须走 socket，这是「关掉 19099 对外仍能显示」的前提
+    uicfg = json.load(open(os.path.join(ROOT, "app", "ui", "config"),
+                           encoding="utf-8"))
+    entry = uicfg[".url"]["vnt-nas.main"]
+    check("桌面入口走 Unix socket",
+          entry.get("gatewaySocket") == "app.sock",
+          entry.get("gatewaySocket"))
+    check("桌面入口用网关前缀",
+          entry.get("gatewayPrefix") == "/app/vnt-nas")
 
 
 def test_diag_shape():
