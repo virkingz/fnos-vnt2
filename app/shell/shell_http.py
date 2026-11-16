@@ -250,6 +250,48 @@ def inject_token(html, token, mount=""):
         "try{return JSON.parse(t)}catch(e){"
         "return {code:-1,msg:'非 JSON 响应('+r.status+')',data:null}};});"
         "});};"
+        # 修正 <img> 的绝对路径。
+        # 前端把资源写成绝对路径（如 <img src="/assets/vnt-icon-xxx.png">），
+        # 且该路径在 minify 后的 JS 里，无法靠改写 HTML 覆盖；
+        # 不改写 JS（minify 代码做字符串替换风险高），改为运行时补前缀。
+        #
+        # 触发条件：只要面板是经本应用 /core/ 代理的，src 的绝对路径就会
+        # 落到站点根而 404（base 标签对绝对路径无效），因此必须补前缀；
+        # 已带前缀或本就正确的一律跳过，保证幂等。
+        "(function(){"
+        "var P=" + _json.dumps(api_prefix + "/") + ";"
+        "function fix(el){"
+        "if(!el||el.nodeName!=='IMG')return;"
+        "var raw=el.getAttribute('src');"
+        "if(!raw)return;"
+        "var s=raw.trim();"
+        "if(s.charAt(0)!=='/'||s.slice(0,2)==='//')return;"
+        "if(s.indexOf(P)===0)return;"
+        "el.setAttribute('src',P+s.slice(1));"
+        "}"
+        "function fixAll(root){"
+        "if(!root||!root.querySelectorAll)return;"
+        "var l=root.querySelectorAll('img');"
+        "for(var i=0;i<l.length;i++)fix(l[i]);"
+        "}"
+        "function ready(){"
+        "fixAll(document);"
+        "try{new MutationObserver(function(ms){"
+        "for(var i=0;i<ms.length;i++){"
+        "var m=ms[i];"
+        "if(m.type==='attributes'){fix(m.target);continue;}"
+        "var ns=m.addedNodes;"
+        "if(!ns)continue;"
+        "for(var j=0;j<ns.length;j++){var n=ns[j];"
+        "if(n.nodeType===1){fix(n);fixAll(n);}}}"
+        "}).observe(document.documentElement,"
+        "{childList:true,subtree:true,attributes:true,attributeFilter:['src']});"
+        "}catch(e){}"
+        "}"
+        "if(document.readyState==='loading')"
+        "document.addEventListener('DOMContentLoaded',ready);"
+        "else ready();"
+        "})();"
     )
     script = "<script>%s</script>" % js
     # base 必须最先出现，且要早于任何相对 URL

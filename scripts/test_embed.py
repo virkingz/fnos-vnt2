@@ -163,6 +163,16 @@ def test_embed_restored():
     check("改写正则限定字母开头",
           "(?=[A-Za-z])" in src, "需防止 SVG 的 /> 被误改")
 
+    # 面板侧边栏 logo 的 src 在 minify 后的 JS 里（绝对路径 /assets/…），
+    # 代理只改 HTML 覆盖不到，需靠注入脚本在运行时补前缀。
+    # 曾表现为：Docker（根路径直连）正常，fpk（/core/ 子路径）图标碎图。
+    check("注入脚本修正 img 绝对路径",
+          "el.nodeName!=='IMG'" in src and "querySelectorAll('img')" in src)
+    check("img 修正用 MutationObserver 覆盖动态渲染",
+          "MutationObserver" in src and "addedNodes" in src)
+    check("img 修正跳过协议相对与已带前缀",
+          "s.slice(0,2)==='//'" in src and "indexOf(P)===0" in src)
+
 
 def test_desktop_entries():
     print("5) 桌面只有一个图标（管理页）")
