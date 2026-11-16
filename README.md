@@ -20,6 +20,20 @@
 
 到 [Releases](../../releases) 下载最新的 `vnt-nas.fpk`。
 
+## Docker 部署
+
+不装飞牛也能用。同一套 `app/shell` 代码可直接跑在 Docker 里：
+
+```bash
+cd docker
+docker compose up -d
+```
+
+访问 `http://<主机>:19099` 即为管理页。需要 `/dev/net/tun` 与 `NET_ADMIN`
+（建 TUN 网卡用）；不想给权限就在组网面板里把网卡模式设为 `no`。
+
+完整说明（环境变量、数据卷、下载加速、多架构、排障）见 **[docker/README.md](docker/README.md)**。
+
 ## 分工
 
 | 谁 | 负责什么 |
@@ -253,6 +267,12 @@ vnt-nas/
 ├── cmd/                      # 生命周期脚本
 ├── config/                   # privilege（root）+ resource
 ├── wizard/                   # 安装/配置/升级/卸载向导
+├── docker/                   # Docker 部署（复用同一份 app/shell）
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   ├── entrypoint.sh         # 容器入口：设定 TRIM_*/VNT_* 并拉起后端
+│   ├── healthcheck.sh
+│   └── README.md
 └── scripts/
     ├── gen_icons.py
     ├── pack.sh               # 打包（推荐）

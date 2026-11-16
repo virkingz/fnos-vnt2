@@ -1,0 +1,26 @@
+# Docker 构建上下文瘦身（只影响 docker build，不影响 git）。
+# 镜像实际只需要 app/ 与 docker/，其余全部排除。
+.git
+.gitattributes
+.gitignore
+.github
+build
+scripts
+wizard
+cmd
+config
+manifest
+CHANGELOG.md
+DEVELOPMENT.md
+README.md
+SUBMIT.md
+VERSIONS.md
+LICENSE
+# 只排除仓库根目录的应用图标；app/shell/web/icon.png 是管理页要用的，必须保留
+/ICON.PNG
+/ICON_256.PNG
+*.fpk
+__pycache__
+*.pyc
+*.pyo
+docker/vnt-nas-data

@@ -1,0 +1,62 @@
+# vnt-nas 一键部署
+#
+# 【本地构建并运行】
+#   cd docker && docker compose up -d
+#
+# 【直接用 CI 构建好的镜像（不本地构建）】
+#   把下面的 build: 三段整体注释掉，并把 image: 改成：
+#     image: ghcr.io/virkingz/fnos-vnt2:latest
+#   （GHCR 包若为私有，需先 docker login ghcr.io）
+#
+# 说明：组网要创建 TUN 虚拟网卡，因此必须给容器 /dev/net/tun 与 NET_ADMIN。
+# 若你的环境无法授予这些能力，可在组网面板里把「网卡模式」设为 no
+# （只做端口映射、不建网卡），此时可删掉 cap_add / devices 两段。
+
+services:
+  vnt-nas:
+    # 本地构建用；想直接拉 GHCR 镜像就把这段注释掉并改用下面的 image
+    build:
+      # 构建上下文是仓库根目录（Dockerfile 里要 COPY app/）
+      context: ..
+      dockerfile: docker/Dockerfile
+    # 本地构建产物的名字。改用 GHCR 时换成 ghcr.io/virkingz/fnos-vnt2:latest
+    image: vnt-nas:latest
+    container_name: vnt-nas
+    restart: unless-stopped
+    # 建 TUN 网卡所需。只做端口映射（device_mode=no）时可以去掉。
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "19099:19099"   # 管理页
+      - "19199:19199"   # 组网面板
+    environment:
+      TZ: Asia/Shanghai
+      # 首次启动自动下载 vnt2_web 核心
+      AUTO_DOWNLOAD_CORE: "1"
+      # 以下都是「按需启用」项：留空/注释掉即不覆盖，会沿用你在管理页里改过的值。
+      # 一旦在这里填了值，每次启动都会以这里为准。
+      #
+      # 端口（默认 19099 / 19199）
+      # PANEL_PORT: "19099"
+      # VNT_WEB_PORT: "19199"
+      # 访问令牌：留空则首次启动自动生成，存于 /data/bin/webtoken
+      # WEB_TOKEN: ""
+      # 下载 GitHub 慢就填镜像前缀，例如 https://ghfast.top
+      # MIRROR: ""
+      # 需要代理才能上外网时填。注意容器里的 127.0.0.1 指容器自己，
+      # 宿主机上的代理要用 host.docker.internal 或宿主机局域网 IP。
+      # PROXY: "socks5h://192.168.1.10:1080"
+      # 组网面板监听范围：1=全部网卡（默认），0=仅回环
+      # LISTEN_ALL: "1"
+    volumes:
+      # 核心二进制、令牌、组网配置、日志都在这里，删容器不丢数据
+      - ./vnt-nas-data:/data
+    healthcheck:
+      # 走容器内脚本：运行时读 ports.env，改了端口也探得准
+      test: ["CMD", "/app/docker/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
