@@ -207,14 +207,14 @@ ghcr.io/virkingz/fnos-vnt2:sha-a1b2c3d
 一份 manifest 同时包含 `linux/amd64`、`linux/arm64`、`linux/arm/v7`，
 `docker pull` 会自动选对架构。
 
-### 首次使用需做一件事
+### 关于镜像可见性
 
-GHCR 的包默认是**私有**的。要公开供他人直接拉取：
+本项目的 GHCR 包已设为 **Public**，可以直接匿名拉取，无需 `docker login`。
 
+> 如果想改回私有（例如不想被公开拉取）：
 > GitHub → 你的头像 → Your packages → `fnos-vnt2` → Package settings →
-> Change visibility → Public
-
-不改也能用，但需要先 `docker login ghcr.io`。
+> 拉到 Danger Zone → Change visibility。
+> 改为私有后，拉取前需先 `docker login ghcr.io`。
 
 ### 改平台或改仓库
 

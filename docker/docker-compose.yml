@@ -6,7 +6,7 @@
 # 【直接用 CI 构建好的镜像（不本地构建）】
 #   把下面的 build: 三段整体注释掉，并把 image: 改成：
 #     image: ghcr.io/virkingz/fnos-vnt2:latest
-#   （GHCR 包若为私有，需先 docker login ghcr.io）
+#   （该包为 Public，可直接拉取，无需先 docker login）
 #
 # 说明：组网要创建 TUN 虚拟网卡，因此必须给容器 /dev/net/tun 与 NET_ADMIN。
 # 若你的环境无法授予这些能力，可在组网面板里把「网卡模式」设为 no
