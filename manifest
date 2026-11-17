@@ -15,4 +15,4 @@ checkport = false
 ctl_stop = true
 desktop_uidir = ui
 desktop_applaunchname = vnt-nas.main
-changelog = 首个版本：支持访问令牌设置、核心在线更新、vnt2_web 托管、网络代理与手动上传核心
+changelog = 首个版本：访问令牌设置、核心在线更新与崩溃自动拉起、组网面板同源内嵌、网络代理与镜像加速、手动上传核心、日志自动清理；并支持 Docker 部署（含 amd64/arm64/armv7 多架构镜像）
